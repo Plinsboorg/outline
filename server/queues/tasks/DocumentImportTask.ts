@@ -57,16 +57,14 @@ export default class DocumentImportTask extends BaseTask<Props> {
         !!collection?.dataSchema &&
         !!team?.getPreference(TeamPreference.DocumentDatabases);
 
-      const { text, state, title, icon, frontmatter } = await documentImporter(
-        {
-          user,
-          fileName: sourceMetadata.fileName,
-          mimeType: sourceMetadata.mimeType,
-          content,
-          ctx,
-          extractFrontmatter,
-        }
-      );
+      const { text, state, title, icon, frontmatter } = await documentImporter({
+        user,
+        fileName: sourceMetadata.fileName,
+        mimeType: sourceMetadata.mimeType,
+        content,
+        ctx,
+        extractFrontmatter,
+      });
 
       const properties =
         frontmatter && collection?.dataSchema

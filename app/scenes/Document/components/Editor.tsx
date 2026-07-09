@@ -32,6 +32,7 @@ import {
 } from "~/utils/routeHelpers";
 import { decodeURIComponentSafe } from "~/utils/urls";
 import MultiplayerEditor from "./AsyncMultiplayerEditor";
+import DocumentProperties from "~/components/DocumentProperties";
 import DocumentMeta from "./DocumentMeta";
 import DocumentTitle from "./DocumentTitle";
 import { first } from "es-toolkit/compat";
@@ -230,6 +231,9 @@ function DocumentEditor(props: Props, ref: React.ForwardedRef<SharedEditor>) {
           }}
           rtl={direction === "rtl"}
         />
+      ) : null}
+      {!shareId && !rest.template ? (
+        <DocumentProperties document={document as Document} />
       ) : null}
       <EditorComponent
         ref={mergeRefs([ref, editorRef, handleRefChanged])}

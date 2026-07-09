@@ -3,6 +3,7 @@ import {
   SortAlphabeticalIcon,
   ArchiveIcon,
   CollectionIcon,
+  DatabaseIcon,
   EditIcon,
   ExportIcon,
   ImportIcon,
@@ -20,10 +21,12 @@ import {
   UnsubscribeIcon,
 } from "outline-icons";
 import { toast } from "sonner";
+import { TeamPreference } from "@shared/types";
 import { errToString } from "@shared/utils/error";
 import Collection from "~/models/Collection";
 import { CollectionEdit } from "~/components/Collection/CollectionEdit";
 import { CollectionNew } from "~/components/Collection/CollectionNew";
+import DatabaseSchemaEditor from "~/components/Collection/DatabaseSchemaEditor";
 import CollectionDeleteDialog from "~/components/CollectionDeleteDialog";
 import ConfirmationDialog from "~/components/ConfirmationDialog";
 import DynamicCollectionIcon from "~/components/Icons/CollectionIcon";
@@ -111,6 +114,33 @@ export const editCollection = createAction({
         <CollectionEdit
           onSubmit={stores.dialogs.closeAllModals}
           collectionId={collection.id}
+        />
+      ),
+    });
+  },
+});
+
+export const manageCollectionDatabase = createAction({
+  name: ({ t, isMenu }) =>
+    isMenu ? `${t("Database properties")}…` : t("Database properties"),
+  analyticsName: "Manage database properties",
+  section: ActiveCollectionSection,
+  icon: <DatabaseIcon />,
+  visible: ({ stores, getActivePolicies }) =>
+    !!stores.auth.team?.getPreference(TeamPreference.DocumentDatabases) &&
+    getActivePolicies(Collection).some((policy) => policy.abilities.update),
+  perform: ({ t, getActiveModel, stores }) => {
+    const collection = getActiveModel(Collection);
+    if (!collection) {
+      return;
+    }
+
+    stores.dialogs.openModal({
+      title: t("Database properties"),
+      content: (
+        <DatabaseSchemaEditor
+          collectionId={collection.id}
+          onSubmit={stores.dialogs.closeAllModals}
         />
       ),
     });
