@@ -8,6 +8,10 @@ import {
   TextEditMode,
   SortFilter,
 } from "@shared/types";
+import {
+  FilterGroupSchema,
+  PropertySortsSchema,
+} from "@server/routes/api/collections/schema";
 import { BaseSchema } from "@server/routes/api/schema";
 import { zodIconType, zodIdType, zodShareIdType } from "@server/utils/zod";
 import { ValidateColor } from "@server/validation";
@@ -97,6 +101,18 @@ export const DocumentsListSchema = BaseSchema.extend({
 
     /** Document statuses to include in results */
     statusFilter: z.enum(StatusFilter).array().optional(),
+
+    /**
+     * Structured filter over document properties. Requires collectionId and
+     * the document databases feature.
+     */
+    filter: FilterGroupSchema.optional(),
+
+    /**
+     * Sort levels over document properties, applied before `sort`. Requires
+     * collectionId and the document databases feature.
+     */
+    propertySorts: PropertySortsSchema.optional(),
   }),
   // Maintains backwards compatibility
 }).transform((req) => {
