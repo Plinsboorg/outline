@@ -7,6 +7,7 @@ import Router from "koa-router";
 import { escapeRegExp, has, remove, uniq } from "es-toolkit/compat";
 import mime from "mime-types";
 import type { Order, ScopeOptions, WhereOptions } from "sequelize";
+import type { Literal } from "sequelize/types/utils";
 import { Op, Sequelize } from "sequelize";
 import { randomUUID } from "node:crypto";
 import { errToString } from "@shared/utils/error";
@@ -17,6 +18,7 @@ import {
   FileOperationState,
   FileOperationType,
   StatusFilter,
+  TeamPreference,
   UserRole,
 } from "@shared/types";
 import { subtractDate } from "@shared/utils/date";
@@ -65,6 +67,7 @@ import {
 } from "@server/models";
 import AttachmentHelper from "@server/models/helpers/AttachmentHelper";
 import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
+import { PropertyQueryHelper } from "@server/models/helpers/PropertyQueryHelper";
 import { ProsemirrorHelper } from "@server/models/helpers/ProsemirrorHelper";
 import SearchProviderManager from "@server/utils/SearchProviderManager";
 import { TextHelper } from "@server/models/helpers/TextHelper";
@@ -113,11 +116,30 @@ router.post(
       parentDocumentId,
       userId: createdById,
       statusFilter,
+      filter,
+      propertySorts,
     } = ctx.input.body;
     const { offset, limit } = ctx.state.pagination;
 
     // always filter by the current team
     const { user } = ctx.state.auth;
+
+    const hasPropertyQuery = !!filter || !!propertySorts?.length;
+    if (hasPropertyQuery) {
+      if (!user.team.getPreference(TeamPreference.DocumentDatabases)) {
+        throw ValidationError("Document databases are currently disabled");
+      }
+      if (!collectionId) {
+        throw ValidationError(
+          "collectionId is required to filter or sort by properties"
+        );
+      }
+      if (sort === "index") {
+        throw ValidationError(
+          "index sort cannot be combined with property filters or sorts"
+        );
+      }
+    }
     const where: WhereOptions<Document> & {
       [Op.and]: WhereOptions<Document>[];
     } = {
@@ -143,6 +165,7 @@ router.post(
     }
 
     let documentIds: string[] = [];
+    let propertyOrder: Literal[] = [];
 
     // if a specific collection is passed then we need to check auth to view it
     if (collectionId) {
@@ -153,6 +176,27 @@ router.post(
       });
 
       authorize(user, "readDocument", collection);
+
+      // build filters and sorts over the properties column against the
+      // collection's data schema
+      if (hasPropertyQuery) {
+        const dataSchema = collection.dataSchema ?? [];
+        if (filter) {
+          const propertyFilter = PropertyQueryHelper.buildFilter(
+            filter,
+            dataSchema
+          );
+          if (propertyFilter) {
+            where[Op.and].push(propertyFilter);
+          }
+        }
+        if (propertySorts?.length) {
+          propertyOrder = PropertyQueryHelper.buildOrder(
+            propertySorts,
+            dataSchema
+          );
+        }
+      }
 
       // index sort is special because it uses the order of the documents in the
       // collection.documentStructure rather than a database column
@@ -306,7 +350,7 @@ router.post(
               ],
             ]
           : undefined
-        : [[sort, direction]];
+        : [...propertyOrder, [sort, direction]];
 
     const includeDrafts = !!statusFilter?.includes(StatusFilter.Draft);
 
@@ -1260,6 +1304,13 @@ router.post(
 
     const { user } = ctx.state.auth;
     let collection: Collection | null | undefined;
+
+    if (
+      input.properties !== undefined &&
+      !user.team.getPreference(TeamPreference.DocumentDatabases)
+    ) {
+      throw ValidationError("Document databases are currently disabled");
+    }
 
     let document = await Document.findByPk(id, {
       userId: user.id,

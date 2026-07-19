@@ -1,0 +1,414 @@
+# Outline — Document Databases
+
+**Implementation specification** · v1 · MVP-first, with the full vision mapped as later phases.
+
+- **Status:** Design / request-for-implementation (RFC)
+- **Audience:** the engineer or model that will implement this feature in this fork.
+
+---
+
+## 0. How to use this document
+
+This spec describes bringing Notion-style **document databases** to Outline, delivered the way Obsidian shipped it: **stepwise**. First document **properties** (typed metadata on a document), then **databases** (views over a set of documents whose properties render as columns).
+
+It is grounded in Outline's actual architecture — every claim about how Outline works today carries a `file:line` reference (see [§12](#12-references)). Implement phase by phase ([§7](#7-phasing-plan)); each phase is independently shippable behind a feature flag. Prefer the **Recommended** option wherever a decision is flagged ([§8](#8-key-decisions--tradeoffs)), but the tradeoffs are laid out so you can revisit them.
+
+---
+
+## 1. Vision & goals
+
+**Goal:** Let a team turn a set of Outline documents into a structured database — each document carries typed properties, and a collection of such documents can be viewed / filtered / sorted as a table (later: board, gallery, calendar, etc.), exactly like a Notion database or an Obsidian Base.
+
+**Concrete user stories (MVP):**
+
+- As an editor, I can define a property schema on a collection (e.g. `Status: select`, `Owner: person`, `Due: date`, `Priority: number`).
+- Each document in that collection shows those properties at the top of the doc and I can edit their values inline.
+- I can open the collection as a **table** where rows = documents and columns = properties, and sort / filter by property.
+- Creating a new document in the database pre-populates the schema (empty typed fields, with defaults).
+
+**Non-goals (MVP):** relations, rollups, formulas, board/calendar/gallery views, grouping, per-property permissions, cross-database relations. All are specified as later phases ([§7](#7-phasing-plan)) so the data model doesn't paint us into a corner.
+
+**Design principles:**
+
+1. **Markdown-first & portable.** Outline stores documents as markdown; property values should serialize to human-readable YAML frontmatter so documents stay portable and diffable (the Obsidian principle "the file is the data").
+2. **But queryable.** Database views must filter/sort across thousands of docs efficiently — so property values **also** live in an indexed JSONB column that is the query source of truth. Frontmatter ⇄ column stay in sync, exactly as Outline already keeps `text`/`content`/`state` in sync today.
+3. **Separate data from views.** Following Obsidian Bases: a "view" is a saved query (filter + sort + columns + type), **not** owned by any single row. It reads live from the documents' properties, so it never desyncs.
+4. **Reuse Outline's spine.** A database is modeled as a Collection with a schema, so document↔collection hierarchy, membership, sharing, and — critically — **authorization** all come for free (document policies already delegate to the collection policy).
+
+---
+
+## 2. Prior art (why these choices)
+
+**Notion.** Database = a set of pages sharing a property schema; every row is a full page. Everything lives in a proprietary block store. Property types: Text, Number, Checkbox, URL, Email, Phone, Select, Multi-select, Status, Date, Person, Files, Formula, Relation, Rollup, Created/Last-edited time & by, ID, Button. Views: Table, Board (Kanban), Timeline, Calendar, List, Gallery. Filters combine per-property conditions with nestable AND/OR; sorts are multi-level; group buckets rows by a property (drives Board columns). Rollups aggregate a property across a Relation; Formulas compute per-row values.
+
+**Obsidian** (closest analogue — markdown-backed):
+
+- **Properties:** YAML frontmatter at the top of the `.md` file rendered as a structured UI. Six types: Text, List, Number, Checkbox, Date, Date & time. Data lives **in the note file**.
+- **Bases** (2025): a separate `.base` YAML file defines dynamic views over notes using their frontmatter as columns. Keys: `filters` (recursive `and`/`or`/`not`), `formulas` (named expressions), `properties` (per-column display config), `views` (list of `{type, name, order, groupBy, sort, filters, summaries}`, `type ∈ table/cards/list/map`). The base stores **no data** — it reads live from note frontmatter. This clean data/view split is what we adopt.
+
+**Peers.** AFFiNE, AppFlowy, Anytype all use proprietary block/CRDT stores (the Notion model) — richer relations/collab, but not portable. Coda is a cloud table-DB hybrid. Only Obsidian keeps structured data in human-readable markdown/YAML.
+
+**Outline's position.** Outline is markdown-backed **and** collaborative (Y.js). So we take Obsidian's portable frontmatter + view/data split, but back it with an indexed column (for query performance) and Outline's existing realtime sync.
+
+---
+
+## 3. Outline architecture recap (grounded)
+
+**Document content** is stored in three synchronized representations (`server/models/Document.ts`):
+
+| Field | Type | Role |
+| --- | --- | --- |
+| `text` | `TEXT` (~L341) | Markdown. `@deprecated` but still what search indexes. |
+| `content` | `JSONB` (~L353) | `ProsemirrorData` snapshot (canonical). |
+| `state` | `BLOB` (~L361) | Y.js/CRDT binary (collab). |
+
+Kept coherent by `server/models/helpers/DocumentHelper.tsx`: `toProsemirror` (~L83), `toJSON` (~L111), `toMarkdown` (~L189), `applyMarkdownToDocument` (~L506) writes all three; `Document.processUpdate` hook backfills `content` (~L513). Server `parser`/`serializer`/`schema` come from `server/editor/index.ts` (built from `withComments(richExtensions)`).
+
+**Collections & hierarchy:**
+
+- `Document.collectionId` (~L661), `parentDocumentId` (self-FK ~L623), `teamId`.
+- `Collection.documentStructure`: JSONB tree (`server/models/Collection.ts` ~L268), maintained by `addDocumentToStructure`/`updateDocument`/etc., cached in Redis.
+- Presenters: `server/presenters/document.ts` (`presentDocument` ~L28), `server/presenters/collection.ts`.
+- `Template` reuses the **same** `documents` table via a scope (`server/models/Template.ts` ~L89) — precedent for scoping.
+
+**Migrations & models (Sequelize):**
+
+- `server/migrations/*.js` (plain JS, `up`/`down`). New table: `20260107213946-create-access-requests.js`; transaction-wrapped: `20260416000000-create-document-insights.js`; `addColumn` JSONB: `20260314000000-add-team-flags.js`.
+- Models: `server/models/*.ts` (sequelize-typescript), registered in `server/models/index.ts`, class decorated `@Fix`.
+- JSONB-with-validate precedent: `Collection.sort` (~L274) has an inline validate block. Typed get/set over a JSONB blob: `User.preferences`/`flags` (`server/models/User.ts` ~L208, `setPreference`/`getPreference` ~L431/451).
+- Array columns: `Document.previousTitles` `ARRAY(STRING)` (~L300).
+
+**Search.** Postgres tsvector on `documents."searchVector"` maintained by a DB **trigger** `documents_search_trigger()` (`server/migrations/20231227040129-update-tsvector-trigger.js`) over title/previousTitles/text. Query side: `plugins/search-postgres/server/PostgresSearchProvider.ts`, `buildWhere` (~L613) assembles filters incl. `collectionId` and ARRAY contains. `index()`/`remove()` are no-ops (triggers do it). Backlinks live in `server/models/Relationship.ts` (relationships table, type enum `Backlink|Similar` ~L46).
+
+**Authorization.** cancan-style, `server/policies/`. Document abilities delegate to the collection: e.g. read/update check `can(actor, "readDocument"/"updateDocument", document.collection)` (`server/policies/document.ts`). Register a new policy file in `server/policies/index.ts`. **⇒ If rows are Documents and databases are Collections, row-level authz is already handled; only schema/view editing needs new abilities.**
+
+**Editor** (`shared/editor` + `app/editor`):
+
+- Node base classes: `shared/editor/nodes/Node.ts` (`schema`, `toMarkdown`, `parseMarkdown`), `ReactNode.ts` (adds `component` for React node views), `Extension.ts` (`plugins`/`keys`/`inputRules`/`commands`). Nodes registered in `shared/editor/nodes/index.ts` (`richExtensions` ~L104).
+- `ExtensionManager` (`shared/editor/lib/ExtensionManager.ts`) builds schema, markdown serializer (~L123) and parser (~L147) from each node's `toMarkdown`/`parseMarkdown`. **⇒ Any new node MUST implement both or it won't round-trip through markdown storage.**
+- Best complex examples to imitate: `ToggleBlock.ts`/`ToggleBlockView.ts` (stateful container, custom fences, decorations, collab-aware) and `Notice.tsx` (simple fenced container with attrs). For an atom React block: `Embed.tsx` (`atom:true`, `component` ~L121). Table lives in `Table.ts`/`TableRow`/`TableHeader`/`TableCell` + `TableView.ts` + `commands/table.ts` (prosemirror-tables).
+- React-in-node bridge: `app/editor/components/ComponentView.tsx` (+ `NodeViewRenderer.tsx`) — lets a node host the full React tree (menus, popovers). `app/editor/index.tsx` `createNodeViews` (~L379).
+- **Frontmatter today:** none live. YAML frontmatter is only handled at import, destructively converted to a ` ```yaml ` code block (`server/utils/DocumentConverter.ts` `processFrontmatter` ~L456). We will make frontmatter first-class.
+- **Security:** any `toDOM` writing `href`/`src` from user data MUST wrap it in `sanitizeUrl()` (`shared/utils/urls.ts`). React node views still must sanitize `href`/`src` (React does not block `javascript:` URLs).
+
+---
+
+## 4. Data model & storage design
+
+### 4.1 Property values (per document)
+
+Add column `documents.properties` `JSONB`, default `'{}'`, not null.
+
+Shape: `{ [propertyId: string]: PropertyValue }`, where `PropertyValue` is typed by the property definition:
+
+| Property type | Stored value |
+| --- | --- |
+| `text` | `string` |
+| `number` | `number` |
+| `select` | optionId (`string`) |
+| `multiSelect` | optionId[] (`string[]`) |
+| `checkbox` | `boolean` |
+| `date` | ISO string (`"YYYY-MM-DD"` or full ISO for datetime) |
+| `url` | `string` (validate + `sanitizeUrl` on render) |
+| `person` | userId (`string`) — later: `string[]` |
+
+**Index:** GIN. Start with default `jsonb_ops` (supports `@>`, `?`, `?&`, `?|` for containment/key filters and multiSelect `Op.contains`). `jsonb_path_ops` is smaller/faster but supports fewer operators — pick `jsonb_ops` for flexibility.
+
+**Typed accessors** on the model mirroring `User.preferences`: `Document.getProperty(propertyId)`, `setProperty(propertyId, value)`.
+
+**Validation:** a `@BeforeSave` hook validates values against the collection's schema (coerce / drop unknown keys), analogous to `Collection.sort`'s inline validate.
+
+### 4.2 The database = a collection with a schema *(recommended for MVP)*
+
+Add columns on `collections`:
+
+```
+collections.dataSchema  JSONB   // Property[] (see 4.4); null = not a database
+collections.views       JSONB   // View[] (see 4.5); null/[] = default
+// optional: collections.isDatabase BOOLEAN default false (explicit flag;
+// otherwise "dataSchema != null" means it's a database)
+```
+
+Rows = the documents already in the collection (`Document.collectionId`). No new join table for MVP. Authorization, membership, hierarchy, and the document tree are reused as-is.
+
+**Forward path** (do **not** build yet, but keep the door open): a standalone `Database` model (new table: `id`, `teamId`, `collectionId?`, `name`, `dataSchema`, `views`) with a nullable `documents.databaseId` FK, enabling (a) multiple databases per collection, (b) inline databases embedded in a document, (c) databases whose rows are a filtered subset. The MVP column-on-collection design is a strict subset, so migrating later is **additive** (backfill a `Database` row per database-collection, set `databaseId` on member docs). Keep property/view types in `@shared/types` so both models can consume them.
+
+### 4.3 Markdown / frontmatter serialization + sync *(the crux — see [§8.1](#81-source-of-truth-for-property-values--the-most-important-decision))*
+
+Source of truth for **values** = `documents.properties` (queryable). Portable representation = YAML frontmatter at the top of the document's markdown:
+
+```yaml
+---
+Status: In progress
+Owner: jane@team.com
+Due: 2026-08-01
+Priority: 2
+---
+```
+
+Sync direction:
+
+- **On write** (`applyMarkdownToDocument` / `processUpdate`): serialize `documents.properties` → frontmatter block in `text`, and keep the JSONB column authoritative. **Or (recommended MVP)** edit values via the properties UI which writes the column directly (`documents.update`); regenerate the frontmatter representation on serialize for export/portability.
+- **On import** (extend `DocumentConverter.processFrontmatter`): parse frontmatter → `documents.properties` instead of the current destructive yaml code block.
+
+Rendering surface: a `DocumentProperties` editor node ([§6.1](#61-document-properties-surface-top-of-document)) reads the column and renders typed fields; it does not need to persist its own content if the column is authoritative. See [§8.1](#81-source-of-truth-for-property-values--the-most-important-decision) for the full tradeoff. **Recommendation: column as source of truth for MVP; treat frontmatter as a serialized projection; make the node/panel edit the column.**
+
+### 4.4 Property type taxonomy
+
+Property definition (stored in `collections.dataSchema`):
+
+```ts
+Property = {
+  id: string            // stable (uuid); values key off this, so renames are safe
+  name: string
+  type: PropertyType
+  options?: { id, name, color }[]   // select / multiSelect / status
+  config?: { numberFormat?, dateIncludesTime?, ... }
+}
+```
+
+- **MVP types:** `text`, `number`, `select`, `multiSelect`, `checkbox`, `date`, `url`, `person`.
+- **Built-in read-only** (free — map to existing Document fields, expose in views without storing in the column): `title`, `createdAt`, `createdBy`, `updatedAt`, `updatedBy`.
+- **Later types:** `status` (grouped select), `email`, `phone`, `files` (reuse Attachment), `relation` (reuse Relationship), `rollup`, `formula`.
+
+### 4.5 View config *(Obsidian-Bases-inspired, Outline-native JSON)*
+
+```ts
+View = {
+  id: string
+  name: string
+  type: "table"                              // later: board | list | gallery | calendar
+  columns: { propertyId, width?, visible }[] // order = column order
+  sorts:   { propertyId, direction: "asc" | "desc" }[]
+  filter?: FilterGroup
+  groupBy?: string                           // propertyId (Phase 3)
+}
+FilterGroup = { conjunction: "and" | "or", conditions: (Condition | FilterGroup)[] }
+Condition   = { propertyId, operator, value }
+// operators: is, isNot, contains, doesNotContain, isEmpty, isNotEmpty,
+//            gt, gte, lt, lte, before, after, on
+```
+
+Views are stored on the collection (or `Database`) and are **not** per-document.
+
+---
+
+## 5. Server changes
+
+### 5.1 Migrations *(generate with `yarn sequelize migration:create --name=...`)*
+
+- **M1 `add-document-properties`:** `addColumn documents.properties JSONB default '{}' notNull`; `CREATE INDEX documents_properties_gin ON documents USING gin (properties);`
+- **M2 `add-collection-database`:** `addColumn collections.dataSchema JSONB null`; `addColumn collections.views JSONB null`; (optional `addColumn collections.isDatabase BOOLEAN default false`).
+
+Wrap multi-statement migrations in a transaction (see the insights migration). Provide `down()` = `removeColumn` / `dropIndex`.
+
+### 5.2 Models
+
+- **`Document.ts`:** add `properties` JSONB column + `getProperty`/`setProperty` accessors + `@BeforeSave validateProperties` (against `collection.dataSchema`). Include `properties` in the default scope (small payload).
+- **`Collection.ts`:** add `dataSchema` and `views` JSONB columns with inline validate blocks (imitate `Collection.sort` ~L274). Helpers: `getProperty(id)`, `upsertProperty()`, `removeProperty()`, `getView(id)`, `upsertView()`, `defaultView()`.
+- **Shared types** in `shared/types` (`PropertyType` enum, `Property`, `View`, `FilterGroup`, `Condition`, `PropertyValue`) so client + server + editor agree.
+
+### 5.3 Sync / serialization
+
+- Extend `DocumentHelper` (`server/models/helpers/DocumentHelper.tsx`): `propertiesToFrontmatter(doc)` and `frontmatterToProperties(text)` helpers. Hook into `applyMarkdownToDocument`/`processUpdate` to keep `text` frontmatter and the `properties` column consistent per [§8.1](#81-source-of-truth-for-property-values--the-most-important-decision)'s chosen direction.
+- Update `server/utils/DocumentConverter.ts` `processFrontmatter` to import frontmatter into properties (guard behind the feature flag; keep old behavior otherwise).
+
+### 5.4 Presenters
+
+- `presentDocument`: include `properties` (`server/presenters/document.ts`).
+- `presentCollection`: include `dataSchema` and `views` (`server/presenters/collection.ts`), gated by API version/permission as needed.
+
+### 5.5 API endpoints *(RESTful RPC under `/api`, thin routes + validation schemas)*
+
+MVP (fold into existing where possible):
+
+- `documents.update`: accept `properties` patch (validate against schema; require `can(update, document)`).
+- `collections.update`: accept `dataSchema` and `views` (require `can(update, collection)`).
+- `documents.list` / a new `collections.documents` (or `databases.rows`): accept `{ collectionId, filter, sorts, pagination }` and build a `WHERE` over the `properties` JSONB column (equality/containment/range) using the GIN index; return presented documents + values. **This is the view query.**
+
+Later (granular): `collections.createProperty/updateProperty/deleteProperty`, `collections.createView/updateView/deleteView`, `databases.*` if the standalone model is introduced. Add zod-style validation schemas alongside each route.
+
+### 5.6 Policies *(`server/policies/`)*
+
+Reuse: editing a document's property values = existing `updateDocument` on the document (delegates to collection). Editing `dataSchema`/`views` = existing `update` on the collection. If a standalone `Database` model is added later, add `server/policies/database.ts` delegating to the owning collection and register it in `server/policies/index.ts`.
+
+### 5.7 Search / filter indexing
+
+- **MVP:** filter/sort via the `properties` JSONB column + GIN index in the view query (do **not** rely on tsvector for structured filters).
+- **Later** (full-text over property text): extend `documents_search_trigger()` to concatenate text/select property values into the tsvector (new migration replacing the trigger function), or maintain a normalized value table if relational querying/aggregation (rollups) demands it.
+
+---
+
+## 6. Client / editor changes
+
+### 6.1 Document properties surface *(top of document)*
+
+**Target (Obsidian-like):** a `DocumentProperties` node pinned at the top of the document, rendered via a React node view (`shared/editor/nodes/DocumentProperties.tsx` extends `ReactNode`; imitate `Notice.tsx` for schema and `ToggleBlock`/`Embed` for the interactive component; host via `ComponentView`). It reads the collection schema + the document's `properties` and renders typed field editors (text input, number, select/multiSelect chips, checkbox, date picker, person picker, url). Edits call `documents.update({ properties })`.
+
+**MVP fallback** (faster, avoids Y.js/round-trip entanglement): render the same typed-field UI as a **properties panel** in the document header (`app/scenes/Document/...`), writing the column via the API. Ship the panel first; promote to an in-body frontmatter node in Phase 2. (See [§8.1](#81-source-of-truth-for-property-values--the-most-important-decision).)
+
+**Security:** `sanitizeUrl()` any url-typed value before using it as `href`.
+
+### 6.2 Database table view *(collection as a table)*
+
+New view mode on the collection scene (`app/scenes/Collection`): a data-bound React **table** where rows = documents (from the view query [§5.5](#55-api-endpoints-restful-rpc-under-api-thin-routes--validation-schemas)), columns = schema properties. Column headers from `dataSchema`; cells are the typed editors (edit writes property values); a header row lets you sort; a filter bar builds the `FilterGroup`. "New row" creates a document in the collection inheriting schema defaults. Reuse the grid UX ideas from `shared/editor/commands/table.ts` but this is a **data-bound React table, NOT** the editable ProseMirror `table` node (the grounding explicitly recommends against reusing the PM table for data rows). Reuse any existing `app/components` table/list primitives.
+
+### 6.3 Inline database block *(Phase 2)*
+
+A `database` atom React node (imitate `Embed.tsx`: `atom:true`, `component`) with attrs `{ collectionId, viewId }` that renders the same table component inline in a host document. `toMarkdown` serializes to a stable fenced/link form; the block fetches rows live (no data stored in the node). `sanitizeUrl` on any links.
+
+### 6.4 State *(MobX, `app/stores/`)*
+
+Extend Document + Collection models/stores to carry `properties`/`dataSchema`/`views`. Add computed helpers (e.g. `collection.isDatabase`, `document.propertyValue(id)`). Consider a lightweight `ViewStore` for the active view's filter/sort UI state. Keep business logic in stores, per repo conventions.
+
+### 6.5 Realtime
+
+Property value changes propagate via the existing document update websocket events (values live in the column, not Y.js). If you later make the in-body frontmatter node the source of truth, collab flows through Y.js automatically but query sync becomes the hard part ([§8.1](#81-source-of-truth-for-property-values--the-most-important-decision)).
+
+---
+
+## 7. Phasing plan
+
+Each phase is shippable behind a feature flag.
+
+| Phase | Name | Scope |
+| --- | --- | --- |
+| **0** | Foundation | Migrations M1+M2; shared types; `Document.properties` + `Collection.dataSchema`/`views` models + validation; presenters; feature flag. Tests for validation & presenter output. No user-visible UI. |
+| **1** | Document properties *(MVP)* | Define a schema on a collection (basic schema editor UI). Edit per-document values via the properties panel/node. Types: text, number, select, multiSelect, checkbox, date, url, person. Frontmatter import/export. API: `documents.update(properties)`, `collections.update(dataSchema)`. |
+| **2** | Database table view *(MVP)* | Collection table view: columns, sort, basic filters ([§5.5](#55-api-endpoints-restful-rpc-under-api-thin-routes--validation-schemas) query). New docs inherit schema defaults. Inline `database` block ([§6.3](#63-inline-database-block-phase-2)). **Completes the Notion-database MVP.** |
+| **3** | More views & grouping | Board (group by select/status), List, Gallery, Calendar (date). `groupBy` in the view config; group-aware queries. |
+| **4** | Relations | `relation` property type referencing documents (reuse `Relationship` model + a new relation type); optional two-way back-reference sync. |
+| **5** | Rollups | Aggregate a target property across a relation (count/sum/avg/min/max/…), evaluated at query time (consider a normalized value table if performance requires). |
+| **6** | Formulas | Per-row computed properties via a typed expression language (adopt a small library or a restricted evaluator). Evaluate server-side for views; client preview while editing. |
+
+---
+
+## 8. Key decisions & tradeoffs
+
+*Read before coding.*
+
+### 8.1 Source of truth for property values — *the most important decision*
+
+**Option A (Recommended MVP): the column is source of truth.** `documents.properties` JSONB is authoritative and queryable; the top-of-doc UI (panel or node) edits it via the API; frontmatter in `text` is a serialized projection regenerated on write/export.
+
+- ✅ Fast, indexable views; simple collab (existing doc-update events); no Y.js/ProseMirror entanglement for structured data.
+- ⚠️ Frontmatter is a projection, so a user hand-editing raw markdown frontmatter needs a parse-back path (handle on save).
+
+**Option B: in-body frontmatter node is source of truth (pure Obsidian model).** A ProseMirror node holds the values; they live in `content`/`state`/`text` and flow through Y.js.
+
+- ✅ Maximum portability; collab is automatic; matches "the file is the data".
+- ⚠️ Building a queryable index over every doc's node is the hard part; every view query must read a denormalized index you must keep fresh; typed filtering/sorting is far more work.
+
+**Decision:** Ship **Option A** for MVP (keep the frontmatter projection so we don't lose portability), and revisit B for advanced portability once views exist.
+
+### 8.2 Database == collection vs standalone model
+
+**Recommended MVP: collection-as-database** ([§4.2](#42-the-database--a-collection-with-a-schema-recommended-for-mvp)) — reuses authz/hierarchy/membership, least code. Limitation: one database per collection, no inline/nested databases, rows == full collection. The forward path (standalone `Database` model + `documents.databaseId`) is purely additive; design types in `@shared/types` so the migration is clean.
+
+### 8.3 Multi-select / relation storage in JSONB
+
+Store option ids / doc ids as arrays; query with Postgres containment (`Op.contains` / `@>`). Use `jsonb_ops` GIN (not `jsonb_path_ops`) so key-exists and containment operators are all available. If aggregate/relational querying gets heavy (Phase 4–5), introduce a normalized `document_property_values` table.
+
+### 8.4 Property identity
+
+Key values by a stable property `id`, **never** by display name — so renaming a property does not orphan values. Options likewise keyed by option id.
+
+---
+
+## 9. Risks & open questions
+
+**Risks:**
+
+- **R1** Collaboration sync of property values (Option A avoids most of this; see [§8.1](#81-source-of-truth-for-property-values--the-most-important-decision)).
+- **R2** Markdown round-trip fidelity of frontmatter; must not break the existing import path (`DocumentConverter.processFrontmatter`) for non-database docs.
+- **R3** JSONB filter/sort performance at scale — GIN helps containment but not range/sort on arbitrary keys; may need expression indexes or a normalized value table for hot properties.
+- **R4** Schema evolution: changing a property's type must coerce/clear existing values safely (write a data-migration path per type change).
+- **R5** Permissions granularity — MVP has no per-property permissions; confirm that's acceptable.
+- **R6** Mobile UX for wide tables (Outline is fully responsive) — horizontal scroll container.
+- **R7** Import/export mapping (Notion export / CSV → schema) is out of MVP scope but users will want it; keep the value model import-friendly.
+
+**Open questions for the team:**
+
+- **Q1** Is one-database-per-collection acceptable for v1? *(Recommend yes.)*
+- **Q2** Should raw-markdown frontmatter edits be authoritative or advisory?
+- **Q3** Relation scope: same-team only? *(Recommend yes.)*
+- **Q4** Formula language: adopt an existing evaluator or build a restricted one?
+
+---
+
+## 10. Testing strategy
+
+Vitest, collocated `.test.ts` (no new test dirs).
+
+- **Unit:** property schema validation & value coercion; frontmatter ⇄ column round-trip; `FilterGroup` → SQL/WHERE builder; policy checks.
+- **Editor:** `DocumentProperties`/`database` node markdown serialize↔parse round-trip (follow existing `shared/editor` node test patterns).
+- **API/integration:** `documents.update(properties)`, `collections.update(dataSchema/views)`, the view query with filters/sorts, authorization (non-member denied).
+- Run per-file: `yarn test path/to/file.test.ts`.
+
+---
+
+## 11. File-touch checklist
+
+*Map for the implementer.*
+
+**Server**
+
+- `server/migrations/*-add-document-properties.js` *(new)*
+- `server/migrations/*-add-collection-database.js` *(new)*
+- `server/models/Document.ts` — properties + hooks
+- `server/models/Collection.ts` — dataSchema, views
+- `server/models/helpers/DocumentHelper.tsx` — frontmatter sync
+- `server/utils/DocumentConverter.ts` — import frontmatter
+- `server/presenters/document.ts` — emit properties
+- `server/presenters/collection.ts` — emit schema/views
+- `server/routes/api/documents/*` — update + view query
+- `server/routes/api/collections/*` — schema/views
+- `server/policies/*` — reuse; add `database.ts` only if standalone model
+- `plugins/search-postgres/server/PostgresSearchProvider.ts` — later: filter query
+
+**Shared**
+
+- `shared/types` — `PropertyType`, `Property`, `View`, `FilterGroup`, `Condition`, values
+- `shared/editor/nodes/DocumentProperties.tsx` *(new, ReactNode)*
+- `shared/editor/nodes/Database.tsx` *(Phase 2, atom node)*
+- `shared/editor/nodes/index.ts` — register nodes
+
+**App**
+
+- `app/editor/...` — node view components, `ComponentView` hosting
+- `app/scenes/Document/...` — properties panel/surface
+- `app/scenes/Collection/...` — table view mode, filter/sort UI, new-row
+- `app/stores/...`, `app/models/...` — Document/Collection extensions, `ViewStore`
+- `app/components/...` — typed field editors, data table
+
+---
+
+## 12. References
+
+**Codebase (grounding):**
+
+- `server/models/Document.ts` — text/content/state ~L341/353/361; collectionId ~L661; parentDocumentId ~L623; previousTitles ~L300
+- `server/models/helpers/DocumentHelper.tsx` — toProsemirror ~L83; toMarkdown ~L189; applyMarkdownToDocument ~L506; processUpdate ~L513
+- `server/models/Collection.ts` — documentStructure ~L268; sort+validate ~L274
+- `server/models/Template.ts` — ~L89 scope over documents table
+- `server/models/User.ts` — preferences/flags ~L208; setPreference ~L431
+- `server/models/Relationship.ts` — relationships table; type enum ~L46
+- `server/presenters/document.ts` (~L28); `server/presenters/collection.ts`
+- `server/policies/document.ts`; `server/policies/collection.ts`; `server/policies/index.ts`
+- `server/migrations/20260107213946-create-access-requests.js`; `20260416000000-create-document-insights.js`; `20260314000000-add-team-flags.js`; `20231227040129-update-tsvector-trigger.js`
+- `server/editor/index.ts`; `server/utils/DocumentConverter.ts` — processFrontmatter ~L456
+- `plugins/search-postgres/server/PostgresSearchProvider.ts` — buildWhere ~L613
+- `shared/editor/nodes/{Node.ts, ReactNode.ts, Notice.tsx, ToggleBlock.ts, ToggleBlockView.ts, Embed.tsx, Table.ts, index.ts}`
+- `shared/editor/lib/{Extension.ts, ExtensionManager.ts, markdown/serializer.ts}`
+- `app/editor/index.tsx` — createNodeViews ~L379; `app/editor/components/ComponentView.tsx`, `NodeViewRenderer.tsx`
+- `shared/utils/urls.ts` — `sanitizeUrl`
+
+**External (prior art):**
+
+- [Notion — database properties](https://www.notion.com/help/database-properties)
+- [Notion — relations & rollups](https://www.notion.com/help/relations-and-rollups)
+- [Notion — formulas 2.0](https://www.notion.com/help/guides/new-formulas-whats-changed)
+- [Obsidian — Properties](https://obsidian.md/help/properties)
+- [Obsidian — Bases syntax](https://obsidian.md/help/bases/syntax)
+- [Obsidian Bases guide (got.md)](https://got.md/obsidian-bases/)
+- [AFFiNE / AppFlowy / Anytype comparison](https://affine.pro/blog/affine-vs-appflowy-vs-anytype)
