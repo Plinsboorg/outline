@@ -5,7 +5,7 @@ Task breakdown for **Phase 3** of the document databases feature. Reads on top o
 (foundation → document properties → table view + inline block), completing the
 Notion-database MVP. Phase 3 adds the remaining view types and grouping.
 
-- **Status:** planned / ready to implement
+- **Status:** implemented 2026-07-22 (Board, List, Gallery — Calendar deliberately skipped, unused)
 - **Prereq:** Phases 0–2 merged on `feat/document-databases`
 - **Flag:** ships behind the existing document-databases feature flag
 
@@ -119,3 +119,40 @@ store/test polish (T9/T10) fold in per view.
 Relations (Phase 4), rollups (Phase 5), formulas (Phase 6). Grouping beyond a single
 `groupBy` (nested groups), board swimlanes, and calendar multi-day spans are
 post-Phase-3.
+
+---
+
+## Implementation notes (2026-07-22)
+
+Shipped Board, List and Gallery. **Calendar was skipped intentionally** (unused
+by the team); T1's `calendarBy` and T2/T6's date-window query were not built.
+
+Decisions that differ from / refine the plan above:
+
+- **Client-side bucketing (T2).** No server changes: the view query already
+  supports property filters + sorts, and views fetch ≤100 flat rows. Bucketing
+  happens in `groupByProperty()` (`shared/utils/properties.ts`), driven by
+  MobX-observable document properties so drag-drop re-buckets instantly.
+  Server-side bucketing (per-column pagination) deferred until row counts
+  demand it.
+- **Multi-select grouping** groups by the **first** option only (per the MVP
+  recommendation). Dragging a card between board columns **replaces** the
+  whole multiSelect value with the target option.
+- **View switcher lives inside the database area** (`DatabaseView.tsx`), not
+  as extra collection tabs; the collection tab was renamed Table → Database.
+  The active layout is persisted per-user in localStorage; shared config
+  (board `groupBy`) is persisted in `collection.views` via
+  `collections.update({ views })`. Switching to a non-table layout lazily
+  creates a saved `DataView` of that type so the inline block can reference
+  it by id.
+- **groupBy validation** now enforces groupable property types
+  (select/multiSelect) in `validateDataView`, shared by client and server.
+- **Inline block parity (T8)**: `DatabaseBlock` renders table/board/list/
+  gallery read-only according to the saved view referenced by its existing
+  `viewId` attr; when editable it shows a picker over the collection's saved
+  views. No node-schema or serialization changes were needed.
+
+Key files: `app/scenes/Collection/components/DatabaseView.tsx` (container),
+`DatabaseBoard.tsx` / `DatabaseList.tsx` / `DatabaseGallery.tsx`,
+`shared/editor/components/PropertyValueLabel.tsx` (shared read-only value
+renderer), `shared/editor/components/DatabaseBlock.tsx`.
