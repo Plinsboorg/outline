@@ -156,3 +156,45 @@ Key files: `app/scenes/Collection/components/DatabaseView.tsx` (container),
 `DatabaseBoard.tsx` / `DatabaseList.tsx` / `DatabaseGallery.tsx`,
 `shared/editor/components/PropertyValueLabel.tsx` (shared read-only value
 renderer), `shared/editor/components/DatabaseBlock.tsx`.
+
+---
+
+## Phase 3 polish + Phases 4 & 5 (2026-07-22, same day)
+
+**Polish** (same session): per-view property visibility ("Properties" popover;
+`visible:false` overrides stored on the active saved view's `columns`, applied
+in all layouts + the inline block via `visiblePropertiesForView()`); optional
+List groupBy sections; Load more pagination; board multiSelect drag now swaps
+only the group option.
+
+**Phase 4 — Relations** (`PropertyType.Relation`):
+- Value = array of document ids (UUIDs, deduped, max
+  `PropertyValidation.maxRelations`), optional `config.targetCollectionId`
+  restricts the picker.
+- Write path validates targets exist in the same team (Document
+  `validateProperties` hook, self-references dropped).
+- `RelationsProcessor` mirrors values into the `relationships` table
+  (`RelationshipType.Relation`, same direction as backlinks: documentId =
+  target). Migration `20260722000000` adds the enum value.
+- UI: chips + add/remove picker in `PropertyValueEditor` (candidates from the
+  target collection, else recently updated); linked-title chips in
+  `PropertyValueLabel` (lazy store fetch); filterable only by empty/not-empty.
+
+**Phase 5 — Rollups** (`PropertyType.Rollup`):
+- `config = { relationPropertyId, rollupPropertyId?, rollupAggregation }`,
+  aggregations count/sum/avg/min/max (numeric targets only).
+- Values are **never stored** (`coercePropertyValue` drops them); computed at
+  read time by `server/models/helpers/RollupHelper` and merged into presented
+  `properties` in `documents.list` and `documents.info` (flag-gated).
+- Excluded from filter/sort at every layer (client UI hides, server
+  `PropertyQueryHelper` rejects).
+- Schema editor: relation-property + aggregation + target-property selects;
+  non-count aggregations require the relation to have a target collection.
+
+**Phase 6 — Formulas: intentionally not planned** (not relevant for this team).
+
+Test infra note: server tests run in the `outline-dev` container against
+`outline-test` DB on the fork's postgres (`docker network connect
+outline-fork_default outline-dev`, then
+`NODE_ENV=test DATABASE_URL=postgres://user:pass@postgres:5432/outline-test
+yarn test <file>`).
