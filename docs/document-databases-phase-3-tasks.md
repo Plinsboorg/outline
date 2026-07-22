@@ -198,3 +198,11 @@ Test infra note: server tests run in the `outline-dev` container against
 outline-fork_default outline-dev`, then
 `NODE_ENV=test DATABASE_URL=postgres://user:pass@postgres:5432/outline-test
 yarn test <file>`).
+
+---
+
+## Next up
+
+Upcoming work relates to the upstream discussion
+[outline/outline#8476](https://github.com/outline/outline/discussions/8476)
+— see there for context before planning the next iteration.
