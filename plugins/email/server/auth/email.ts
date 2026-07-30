@@ -1,7 +1,9 @@
 import Router from "koa-router";
+import type { InferCreationAttributes } from "sequelize";
 import { errToString } from "@shared/utils/error";
 import { Client, NotificationEventType } from "@shared/types";
 import { parseDomain } from "@shared/utils/domains";
+import { parseEmail } from "@shared/utils/email";
 import InviteAcceptedEmail from "@server/emails/templates/InviteAcceptedEmail";
 import SigninEmail from "@server/emails/templates/SigninEmail";
 import WelcomeEmail from "@server/emails/templates/WelcomeEmail";
@@ -48,29 +50,44 @@ router.post(
       throw AuthorizationError();
     }
 
-    const user = await User.scope("withAuthentications").findOne({
+    let user = await User.scope("withAuthentications").findOne({
       where: {
         teamId: team.id,
         email: email.toLowerCase(),
       },
     });
 
-    if (!user) {
-      ctx.body = {
-        success: true,
-      };
-      return;
-    }
-
     // If the user matches an email address associated with an SSO
     // provider then just forward them directly to that sign-in page
-    if (user.authentications.length) {
+    if (user?.authentications.length) {
       const authenticationProvider =
         user.authentications[0].authenticationProvider;
       ctx.body = {
         redirect: `${team.url}/auth/${authenticationProvider?.name}`,
       };
       return;
+    }
+
+    if (!user) {
+      // Fork addition: open email signup. When the team does not require
+      // invites, any address passing the allowed-domain restrictions may
+      // create an account by signing in — ownership of the address is
+      // proven by the emailed link before the account can be used.
+      if (team.inviteRequired || !(await team.isDomainAllowed(email))) {
+        // respond with success regardless, to avoid leaking whether an
+        // account exists
+        ctx.body = {
+          success: true,
+        };
+        return;
+      }
+
+      user = await User.createWithCtx(ctx, {
+        name: parseEmail(email).local,
+        email: email.toLowerCase(),
+        role: team.defaultUserRole,
+        teamId: team.id,
+      } as Partial<InferCreationAttributes<User>>);
     }
 
     // Generate both a link token and a 6-digit verification code

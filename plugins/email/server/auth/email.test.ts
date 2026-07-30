@@ -1,7 +1,7 @@
 import { faker } from "@faker-js/faker";
 import SigninEmail from "@server/emails/templates/SigninEmail";
 import WelcomeEmail from "@server/emails/templates/WelcomeEmail";
-import { AuthenticationProvider } from "@server/models";
+import { AuthenticationProvider, User } from "@server/models";
 import { buildUser, buildGuestUser, buildTeam } from "@server/test/factories";
 import { getTestServer } from "@server/test/support";
 
@@ -122,6 +122,53 @@ describe("email", () => {
     expect(body.success).toEqual(true);
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  describe("open email signup", () => {
+    it("should create an account and send a signin email for an unknown address when invites are not required", async () => {
+      const spy = vi.spyOn(SigninEmail.prototype, "schedule");
+      const subdomain = faker.internet.domainWord();
+      const team = await buildTeam({ subdomain, inviteRequired: false });
+      const email = `${faker.internet.domainWord()}@example.com`;
+      const res = await server.post("/auth/email", {
+        body: { email },
+        headers: {
+          host: `${subdomain}.outline.dev`,
+        },
+      });
+      const body = await res.json();
+      expect(res.status).toEqual(200);
+      expect(body.success).toEqual(true);
+      const user = await User.findOne({
+        where: { teamId: team.id, email },
+      });
+      expect(user).toBeTruthy();
+      expect(user?.role).toEqual(team.defaultUserRole);
+      expect(spy).toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    it("should not create an account when the team requires invites", async () => {
+      const spy = vi.spyOn(SigninEmail.prototype, "schedule");
+      const subdomain = faker.internet.domainWord();
+      const team = await buildTeam({ subdomain, inviteRequired: true });
+      const email = `${faker.internet.domainWord()}@example.com`;
+      const res = await server.post("/auth/email", {
+        body: { email },
+        headers: {
+          host: `${subdomain}.outline.dev`,
+        },
+      });
+      const body = await res.json();
+      expect(res.status).toEqual(200);
+      expect(body.success).toEqual(true);
+      const user = await User.findOne({
+        where: { teamId: team.id, email },
+      });
+      expect(user).toBeNull();
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
   });
 
   it("should respond with success regardless of whether successful to prevent crawling email logins", async () => {
