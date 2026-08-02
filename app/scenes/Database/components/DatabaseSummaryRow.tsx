@@ -139,6 +139,7 @@ const SummaryCell = styled.td`
   border-top: 1px solid ${s("divider")};
   padding: 4px;
   vertical-align: top;
+  overflow: hidden;
 
   &:not(:last-child) {
     border-right: 1px solid ${s("divider")};

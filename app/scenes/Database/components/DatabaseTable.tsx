@@ -294,9 +294,27 @@ function DatabaseTable({
     </tbody>
   );
 
+  // fixed table layout sizes columns from the header row alone, so content
+  // can never stop a column from being resized narrow. That requires the
+  // table's own width to be the sum of its column widths — stretched to the
+  // container when the columns do not fill it, with the trailing controls
+  // column absorbing the difference.
+  const totalWidth =
+    (hasGripColumn ? GRIP_COLUMN_WIDTH : 0) +
+    (hasControlsColumn ? CONTROLS_COLUMN_WIDTH : 0) +
+    columnIds.reduce(
+      (sum, id) =>
+        sum +
+        (widthFor(id) ??
+          (id === TITLE_COLUMN_ID
+            ? DEFAULT_TITLE_WIDTH
+            : DEFAULT_COLUMN_WIDTH)),
+      0
+    );
+
   return (
     <ScrollContainer>
-      <Grid>
+      <Grid style={{ width: totalWidth, minWidth: "100%" }}>
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -447,6 +465,19 @@ function DatabaseTableHeader({
 /** The width every column may be resized down to but not below. */
 const MIN_COLUMN_WIDTH = 27;
 
+/** The width of a property column with no stored width. */
+const DEFAULT_COLUMN_WIDTH = 140;
+
+/** The width of the title column with no stored width. */
+const DEFAULT_TITLE_WIDTH = 220;
+
+/** The width of the leading row-grip column. */
+const GRIP_COLUMN_WIDTH = 20;
+
+/** The base width of the trailing controls column, which also absorbs any
+ * width left over when the columns do not fill the container. */
+const CONTROLS_COLUMN_WIDTH = 60;
+
 /** Splices the title cell into a row's property cells at the title's index. */
 function cellsWithTitle(
   cells: React.ReactNode[],
@@ -529,7 +560,7 @@ function DatabaseTableTitleHeader({
     <HeaderCell
       as="th"
       ref={setNodeRef}
-      $minWidth={width ? undefined : 220}
+      $defaultWidth={width ? undefined : DEFAULT_TITLE_WIDTH}
       $flush={!!onRename}
       $dragging={isDragging}
       $dropSide={dropSide}
@@ -734,12 +765,14 @@ const ScrollContainer = styled.div`
 
 const Grid = styled.table`
   border-collapse: collapse;
-  width: 100%;
+  /* column widths come from the header row alone, so cell content cannot
+     stop a column from being resized narrow */
+  table-layout: fixed;
   font-size: 14px;
 `;
 
 const HeaderCell = styled.th<{
-  $minWidth?: number;
+  $defaultWidth?: number;
   $flush?: boolean;
   $dragging?: boolean;
   $dropSide?: "left" | "right";
@@ -751,7 +784,9 @@ const HeaderCell = styled.th<{
   padding: ${(props) => (props.$flush ? 0 : "8px 10px")};
   border-bottom: 1px solid ${s("divider")};
   white-space: nowrap;
-  min-width: ${(props) => props.$minWidth ?? 140}px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: ${(props) => props.$defaultWidth ?? DEFAULT_COLUMN_WIDTH}px;
   user-select: none;
   opacity: ${(props) => (props.$dragging ? 0.5 : 1)};
 
@@ -767,7 +802,7 @@ const HeaderCell = styled.th<{
       position: absolute;
       top: 0;
       bottom: 0;
-      ${props.$dropSide}: -1px;
+      ${props.$dropSide}: 0;
       width: 2px;
       background: ${props.theme.accent};
       pointer-events: none;
@@ -809,6 +844,7 @@ const Row = styled.tr<{ $dragging?: boolean }>`
 const Cell = styled.td`
   padding: 2px 4px;
   vertical-align: middle;
+  overflow: hidden;
 
   &:not(:last-child) {
     border-right: 1px solid ${s("divider")};
@@ -896,8 +932,8 @@ const ResizeGrip = styled.div`
   position: absolute;
   top: 0;
   bottom: 0;
-  right: -3px;
-  width: 6px;
+  right: 0;
+  width: 5px;
   cursor: col-resize;
   z-index: 2;
   touch-action: none;
