@@ -276,6 +276,33 @@ describe("#databases.update", () => {
     await second.reload();
     expect(first.properties[propertyId]).toEqual(1);
     expect(second.properties[propertyId]).toEqual(2);
+
+    // toggling off and on again renumbers from the configured start
+    await server.post("/api/databases.update", user, {
+      body: {
+        id: database.id,
+        dataSchema: [{ id: propertyId, name: "ID", type: PropertyType.Number }],
+      },
+    });
+    const res2 = await server.post("/api/databases.update", user, {
+      body: {
+        id: database.id,
+        dataSchema: [
+          {
+            id: propertyId,
+            name: "ID",
+            type: PropertyType.Number,
+            config: { autoNumber: true, autoNumberStart: 100 },
+          },
+        ],
+      },
+    });
+    expect(res2.status).toEqual(200);
+
+    await first.reload();
+    await second.reload();
+    expect(first.properties[propertyId]).toEqual(100);
+    expect(second.properties[propertyId]).toEqual(101);
   });
 
   it("should reject a view referencing an unknown property", async () => {

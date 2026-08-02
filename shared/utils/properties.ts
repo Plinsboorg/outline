@@ -623,6 +623,16 @@ function validateProperty(property: unknown): asserts property is Property {
         `Property config autoNumberPrefix must be a string of ${PropertyValidation.maxAutoNumberPrefixLength} or fewer characters`
       );
     }
+    if (
+      property.config.autoNumberStart !== undefined &&
+      (typeof property.config.autoNumberStart !== "number" ||
+        !Number.isInteger(property.config.autoNumberStart) ||
+        property.config.autoNumberStart < 0)
+    ) {
+      throw new Error(
+        "Property config autoNumberStart must be a non-negative integer"
+      );
+    }
   }
 
   if ((property.type as PropertyType) === PropertyType.Relation) {
@@ -782,7 +792,10 @@ function validateDataView(
     if (!isPlainObject(sort)) {
       throw new Error("Each view sort must be an object");
     }
-    validatePropertyReference(sort.propertyId, knownPropertyIds);
+    // the title is not a schema property but rows can be sorted by it
+    if (sort.propertyId !== TITLE_COLUMN_ID) {
+      validatePropertyReference(sort.propertyId, knownPropertyIds);
+    }
     if (sort.direction !== "asc" && sort.direction !== "desc") {
       throw new Error("View sort direction must be one of asc,desc");
     }

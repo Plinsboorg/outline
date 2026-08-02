@@ -35,9 +35,9 @@ import type {
   PropertyOption,
   SummaryAggregation,
 } from "@shared/types";
+import { PropertyType } from "@shared/types";
 import { errToString } from "@shared/utils/error";
 import { TITLE_COLUMN_ID } from "@shared/utils/properties";
-import { PropertyValidation } from "@shared/validations";
 import type Document from "~/models/Document";
 import PropertyValueEditor from "~/components/DocumentProperties/PropertyValueEditor";
 import Flex from "~/components/Flex";
@@ -223,6 +223,8 @@ function DatabaseTable({
       key={TITLE_COLUMN_ID}
       name={titleName}
       onRename={onRenameTitle}
+      sort={sort}
+      onSetSort={onSetSort}
       isSortable={!!onMoveProperty}
       width={widthFor(TITLE_COLUMN_ID)}
       onResizeDraft={onResizeColumn ? handleResizeDraft : undefined}
@@ -430,6 +432,7 @@ function DatabaseTableHeader({
           onChangeOptions={(options: PropertyOption[]) =>
             onUpdateProperty(property.id, { options })
           }
+          onChangeConfig={(config) => onUpdateProperty(property.id, { config })}
           onDelete={() => onDeleteProperty(property.id)}
         >
           {headerContent}
@@ -442,7 +445,7 @@ function DatabaseTableHeader({
 }
 
 /** The width every column may be resized down to but not below. */
-const MIN_COLUMN_WIDTH = 80;
+const MIN_COLUMN_WIDTH = 27;
 
 /** Splices the title cell into a row's property cells at the title's index. */
 function cellsWithTitle(
@@ -462,12 +465,14 @@ function columnWidthStyle(width?: number): React.CSSProperties | undefined {
 
 /**
  * The title column's header. The title is not a schema property but its
- * column drags and resizes like one, and clicking the header renames it
- * inline when allowed.
+ * column drags and resizes like one, and clicking the header opens the same
+ * settings menu as a property column, reduced to rename and sort.
  */
 function DatabaseTableTitleHeader({
   name,
   onRename,
+  sort,
+  onSetSort,
   isSortable,
   width,
   onResizeDraft,
@@ -475,14 +480,14 @@ function DatabaseTableTitleHeader({
 }: {
   name?: string;
   onRename?: (name: string) => void;
+  sort?: DataViewSort;
+  onSetSort: (propertyId: string, direction: "asc" | "desc" | null) => void;
   isSortable: boolean;
   width?: number;
   onResizeDraft?: (columnId: string, width: number) => void;
   onResizeCommit?: (columnId: string, width: number) => void;
 }) {
   const { t } = useTranslation();
-  const [isEditing, setIsEditing] = React.useState(false);
-  const [draft, setDraft] = React.useState("");
   const {
     attributes,
     listeners,
@@ -501,33 +506,24 @@ function DatabaseTableTitleHeader({
     : undefined;
 
   const label = name || t("Title");
-
-  const handleStartEditing = () => {
-    setDraft(name ?? "");
-    setIsEditing(true);
+  // the menu reads name/type from a property, so the title masquerades as a
+  // text property under its sentinel id
+  const titleProperty: Property = {
+    id: TITLE_COLUMN_ID,
+    name: label,
+    type: PropertyType.Text,
   };
 
-  const handleCommit = () => {
-    setIsEditing(false);
-    const next = draft.trim();
-    if (next !== (name ?? "")) {
-      onRename?.(next);
-    }
-  };
-
-  const handleKeyDown = (ev: React.KeyboardEvent<HTMLInputElement>) => {
-    if (ev.nativeEvent.isComposing) {
-      return;
-    }
-    if (ev.key === "Enter") {
-      ev.preventDefault();
-      handleCommit();
-    }
-    if (ev.key === "Escape") {
-      ev.preventDefault();
-      setIsEditing(false);
-    }
-  };
+  const headerContent = (
+    <>
+      {label}
+      {sort?.propertyId === TITLE_COLUMN_ID
+        ? sort.direction === "asc"
+          ? " ↑"
+          : " ↓"
+        : ""}
+    </>
+  );
 
   return (
     <HeaderCell
@@ -554,22 +550,17 @@ function DatabaseTableTitleHeader({
           onCommit={onResizeCommit}
         />
       )}
-      {isEditing ? (
-        <TitleNameInput
-          autoFocus
-          value={draft}
-          placeholder={t("Title")}
-          maxLength={PropertyValidation.maxNameLength}
-          onChange={(ev) => setDraft(ev.target.value)}
-          onBlur={handleCommit}
-          onKeyDown={handleKeyDown}
-        />
-      ) : onRename ? (
-        <TitleHeaderButton type="button" onClick={handleStartEditing}>
-          {label}
-        </TitleHeaderButton>
+      {onRename ? (
+        <DatabasePropertyMenu
+          property={titleProperty}
+          sort={sort}
+          onRename={onRename}
+          onSetSort={(direction) => onSetSort(TITLE_COLUMN_ID, direction)}
+        >
+          {headerContent}
+        </DatabasePropertyMenu>
       ) : (
-        label
+        headerContent
       )}
     </HeaderCell>
   );
@@ -912,39 +903,6 @@ const ResizeGrip = styled.div`
   &:active {
     background: ${s("accent")};
     opacity: 0.5;
-  }
-`;
-
-/** The title header's click target, styled like a property header button. */
-const TitleHeaderButton = styled.button`
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  padding: 8px 10px;
-  cursor: var(--pointer);
-  display: flex;
-  width: 100%;
-  align-items: center;
-  text-align: left;
-
-  &:hover {
-    background: ${s("backgroundSecondary")};
-    color: ${s("text")};
-  }
-`;
-
-const TitleNameInput = styled.input`
-  border: 0;
-  outline: none;
-  background: none;
-  color: ${s("text")};
-  font: inherit;
-  width: 100%;
-  padding: 8px 10px;
-
-  &::placeholder {
-    color: ${s("placeholder")};
   }
 `;
 

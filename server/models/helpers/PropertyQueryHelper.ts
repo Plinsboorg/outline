@@ -7,6 +7,7 @@ import type {
   Property,
 } from "@shared/types";
 import { FilterOperator, PropertyType } from "@shared/types";
+import { TITLE_COLUMN_ID } from "@shared/utils/properties";
 import { ValidationError } from "@server/errors";
 import { sequelize } from "@server/storage/database";
 
@@ -54,8 +55,13 @@ export class PropertyQueryHelper {
     column = `"document"."properties"`
   ): Literal[] {
     return sorts.map((sort) => {
-      const property = this.getProperty(schema, sort.propertyId);
       const direction = sort.direction === "desc" ? "DESC" : "ASC";
+      // the title is a document column rather than a schema property
+      if (sort.propertyId === TITLE_COLUMN_ID) {
+        const table = column.split(".")[0];
+        return Sequelize.literal(`${table}."title" ${direction} NULLS LAST`);
+      }
+      const property = this.getProperty(schema, sort.propertyId);
       return Sequelize.literal(
         `${this.sortExpression(property, column)} ${direction} NULLS LAST`
       );

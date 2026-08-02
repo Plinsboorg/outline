@@ -548,6 +548,8 @@ export type PropertyConfig = {
   autoNumber?: boolean;
   /** A prefix shown before auto-numbered values, e.g. "HW-" for HW-1. */
   autoNumberPrefix?: string;
+  /** The number auto-numbering starts counting from; defaults to 1. */
+  autoNumberStart?: number;
   /** The database a relation property references rows from. */
   targetDatabaseId?: string;
   /**

@@ -243,7 +243,10 @@ class Database extends ParanoidModel<
         (column) =>
           known.has(column.propertyId) || column.propertyId === TITLE_COLUMN_ID
       ),
-      sorts: view.sorts.filter((sort) => known.has(sort.propertyId)),
+      sorts: view.sorts.filter(
+        (sort) =>
+          known.has(sort.propertyId) || sort.propertyId === TITLE_COLUMN_ID
+      ),
       filter: view.filter
         ? pruneFilterReferences(view.filter, known)
         : undefined,
@@ -305,8 +308,9 @@ class Database extends ParanoidModel<
   };
 
   /**
-   * Computes the next value for each auto-numbered property of this database,
-   * counting past soft-deleted rows so numbers are never reused.
+   * Computes the next value for each auto-numbered property of this database:
+   * one past the highest number a live row holds, and never below the
+   * property's configured starting number.
    *
    * @param transaction The transaction to read within, if any
    * @returns The next values, keyed by property id.
@@ -322,18 +326,20 @@ class Database extends ParanoidModel<
       ) {
         continue;
       }
-      result[property.id] =
-        (await this.maxAutoNumber(property.id, transaction)) + 1;
+      const start = property.config.autoNumberStart ?? 1;
+      const max = await this.maxAutoNumber(property.id, transaction);
+      result[property.id] = Math.max(max + 1, start);
     }
     return result;
   };
 
   /**
-   * Assigns numbers to every row missing a value for the given auto-numbered
-   * properties, in row creation order, continuing after the highest existing
-   * number. Called when auto-numbering is enabled on an existing property.
+   * Renumbers every row for the given auto-numbered properties, in row
+   * creation order, counting up from each property's configured starting
+   * number. Called when auto-numbering is enabled, so toggling it off and on
+   * again is the way to renumber a database.
    *
-   * @param properties The auto-numbered properties to backfill
+   * @param properties The auto-numbered properties to renumber
    * @param options The transaction to write within, if any
    */
   assignAutoNumbers = async (
@@ -350,11 +356,8 @@ class Database extends ParanoidModel<
       transaction,
     });
     for (const property of properties) {
-      let next = (await this.maxAutoNumber(property.id, transaction)) + 1;
+      let next = property.config?.autoNumberStart ?? 1;
       for (const row of rows) {
-        if (typeof row.properties?.[property.id] === "number") {
-          continue;
-        }
         row.properties = { ...row.properties, [property.id]: next };
         next += 1;
       }
@@ -395,8 +398,9 @@ class Database extends ParanoidModel<
   });
 
   /**
-   * Returns the highest number stored for a property across every row of
-   * this database, including soft-deleted rows.
+   * Returns the highest number stored for a property across the live rows of
+   * this database. Deleted rows are ignored so their numbers do not push the
+   * sequence forward; a restored row may therefore share a number.
    */
   private maxAutoNumber = async (
     propertyId: string,
@@ -404,7 +408,7 @@ class Database extends ParanoidModel<
   ): Promise<number> => {
     const rows = await this.sequelize.query<{ max: string }>(
       `SELECT COALESCE(MAX(CASE WHEN jsonb_typeof(properties -> :propertyId) = 'number' THEN (properties ->> :propertyId)::numeric END), 0) AS max
-       FROM documents WHERE "databaseId" = :databaseId`,
+       FROM documents WHERE "databaseId" = :databaseId AND "deletedAt" IS NULL`,
       {
         replacements: { propertyId, databaseId: this.id },
         type: QueryTypes.SELECT,

@@ -348,28 +348,43 @@ function DatabaseSchemaEditor({ databaseId, onSubmit }: Props) {
                   label={t("Number rows automatically")}
                   labelPosition="right"
                   checked={!!property.config?.autoNumber}
+                  // prefix and start survive toggling off, so that turning
+                  // auto-numbering off and on again renumbers with the same
+                  // settings
                   onChange={(checked) =>
-                    updateConfig(index, {
-                      autoNumber: checked || undefined,
-                      autoNumberPrefix: checked
-                        ? property.config?.autoNumberPrefix
-                        : undefined,
-                    })
+                    updateConfig(index, { autoNumber: checked || undefined })
                   }
                   inForm={false}
                 />
                 {property.config?.autoNumber && (
-                  <PrefixInput
-                    value={property.config?.autoNumberPrefix ?? ""}
-                    placeholder={t("Prefix")}
-                    maxLength={PropertyValidation.maxAutoNumberPrefixLength}
-                    onChange={(ev: React.ChangeEvent<HTMLInputElement>) =>
-                      updateConfig(index, {
-                        autoNumberPrefix: ev.target.value || undefined,
-                      })
-                    }
-                    margin={0}
-                  />
+                  <>
+                    <PrefixInput
+                      value={property.config?.autoNumberPrefix ?? ""}
+                      placeholder={t("Prefix")}
+                      maxLength={PropertyValidation.maxAutoNumberPrefixLength}
+                      onChange={(ev: React.ChangeEvent<HTMLInputElement>) =>
+                        updateConfig(index, {
+                          autoNumberPrefix: ev.target.value || undefined,
+                        })
+                      }
+                      margin={0}
+                    />
+                    <PrefixInput
+                      pattern="[0-9]*"
+                      value={property.config?.autoNumberStart ?? ""}
+                      placeholder={t("Start at")}
+                      onChange={(ev: React.ChangeEvent<HTMLInputElement>) => {
+                        const parsed = Number.parseInt(ev.target.value, 10);
+                        updateConfig(index, {
+                          autoNumberStart:
+                            Number.isInteger(parsed) && parsed >= 0
+                              ? parsed
+                              : undefined,
+                        });
+                      }}
+                      margin={0}
+                    />
+                  </>
                 )}
               </Flex>
             )}

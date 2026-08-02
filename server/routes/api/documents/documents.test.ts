@@ -6648,6 +6648,23 @@ describe("#documents.list property filters", () => {
     ]);
   });
 
+  it("should sort by the title column", async () => {
+    const { user, database } = await buildFixture();
+    const res = await server.post("/api/documents.list", user, {
+      body: {
+        databaseId: database.id,
+        propertySorts: [{ propertyId: "title", direction: "desc" }],
+      },
+    });
+    const json = await res.json();
+    expect(res.status).toEqual(200);
+    expect(json.data.map((doc: { title: string }) => doc.title)).toEqual([
+      "Third",
+      "Second",
+      "First",
+    ]);
+  });
+
   it("should sort select properties by option name", async () => {
     const { user, database } = await buildFixture();
     const res = await server.post("/api/documents.list", user, {

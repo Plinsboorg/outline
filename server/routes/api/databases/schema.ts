@@ -45,6 +45,7 @@ export const PropertySchema = z.object({
         .string()
         .max(PropertyValidation.maxAutoNumberPrefixLength)
         .optional(),
+      autoNumberStart: z.number().int().min(0).optional(),
       relationPropertyId: z.string().optional(),
       rollupPropertyId: z.string().optional(),
       rollupAggregation: z.enum(RollupAggregation).optional(),

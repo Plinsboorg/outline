@@ -231,7 +231,7 @@ describe("validateDataViews", () => {
     },
   };
 
-  it("should accept a title column entry, but not a title sort", () => {
+  it("should accept title column entries and title sorts", () => {
     expect(() =>
       validateDataViews(
         [
@@ -241,21 +241,15 @@ describe("validateDataViews", () => {
               ...validView.columns,
               { propertyId: TITLE_COLUMN_ID, visible: true, width: 240 },
             ],
-          },
-        ],
-        schema
-      )
-    ).not.toThrow();
-    expect(() =>
-      validateDataViews(
-        [
-          {
-            ...validView,
             sorts: [{ propertyId: TITLE_COLUMN_ID, direction: "asc" as const }],
           },
         ],
         schema
       )
+    ).not.toThrow();
+    // the title cannot group a view, and filters still need a real property
+    expect(() =>
+      validateDataViews([{ ...validView, groupBy: TITLE_COLUMN_ID }], schema)
     ).toThrow();
   });
 

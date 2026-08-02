@@ -579,6 +579,13 @@ function DatabaseView({ database }: Props) {
                     label: t("No sorting"),
                     value: NO_GROUPING,
                   },
+                  {
+                    type: "item" as const,
+                    label: t("Sort by {{ propertyName }}", {
+                      propertyName: database.titleName ?? t("Title"),
+                    }),
+                    value: TITLE_COLUMN_ID,
+                  },
                   ...sortableProperties.map((property) => ({
                     type: "item" as const,
                     label: t("Sort by {{ propertyName }}", {
