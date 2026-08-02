@@ -776,10 +776,14 @@ const HeaderCell = styled.th<{
   `}
 `;
 
+/**
+ * The trailing controls column doubles as the table's expansion slack: the
+ * table is 100% wide, so whatever width the data columns give up has to land
+ * somewhere — here, rather than in a data column the user just narrowed.
+ */
 const ControlsCell = styled.th`
   border-bottom: 1px solid ${s("divider")};
   padding: 4px 6px;
-  width: 60px;
   min-width: 60px;
   vertical-align: middle;
 `;
@@ -821,7 +825,6 @@ const GripCell = styled.td`
 /** The trailing cell of a body row, holding that row's overflow menu. */
 const RowControlsCell = styled.td`
   padding: 2px 6px;
-  width: 60px;
   min-width: 60px;
   vertical-align: middle;
 
