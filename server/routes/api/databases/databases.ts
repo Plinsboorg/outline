@@ -1,7 +1,7 @@
 import Router from "koa-router";
 import { Op } from "sequelize";
 import type { Property } from "@shared/types";
-import { TeamPreference } from "@shared/types";
+import { PropertyType, TeamPreference } from "@shared/types";
 import { errToString } from "@shared/utils/error";
 import { validateDataViews } from "@shared/utils/properties";
 import { DatabaseValidation } from "@shared/validations";
@@ -179,6 +179,7 @@ router.post(
       icon,
       color,
       fullWidth,
+      titleName,
       collectionId,
       dataSchema,
       views,
@@ -213,6 +214,9 @@ router.post(
     }
     if (fullWidth !== undefined) {
       database.fullWidth = fullWidth;
+    }
+    if (titleName !== undefined) {
+      database.titleName = titleName?.trim() || null;
     }
     if (dataSchema !== undefined) {
       database.dataSchema = dataSchema as Property[];
@@ -261,6 +265,17 @@ router.post(
       await RelationHelper.syncInverseProperties(database, previousSchema, {
         transaction,
       });
+
+      // enabling auto-numbering numbers the rows that exist already, so the
+      // sequence is complete rather than starting with the next created row
+      const newlyAutoNumbered = database.dataSchema.filter(
+        (property) =>
+          property.type === PropertyType.Number &&
+          property.config?.autoNumber &&
+          !previousSchema?.find((item) => item.id === property.id)?.config
+            ?.autoNumber
+      );
+      await database.assignAutoNumbers(newlyAutoNumbered, { transaction });
     }
 
     ctx.body = {

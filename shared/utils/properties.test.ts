@@ -8,6 +8,7 @@ import {
   SummaryAggregation,
 } from "../types";
 import {
+  TITLE_COLUMN_ID,
   coerceDocumentProperties,
   coercePropertyValue,
   groupByProperty,
@@ -108,6 +109,33 @@ describe("validateDataSchema", () => {
     expect(() => validateDataSchema(schema)).not.toThrow();
   });
 
+  it("should validate auto-number config", () => {
+    const base = { id: uuidv4(), name: "ID" };
+    expect(() =>
+      validateDataSchema([
+        {
+          ...base,
+          type: PropertyType.Number,
+          config: { autoNumber: true, autoNumberPrefix: "HW-" },
+        },
+      ])
+    ).not.toThrow();
+    expect(() =>
+      validateDataSchema([
+        { ...base, type: PropertyType.Text, config: { autoNumber: true } },
+      ])
+    ).toThrow();
+    expect(() =>
+      validateDataSchema([
+        {
+          ...base,
+          type: PropertyType.Number,
+          config: { autoNumber: true, autoNumberPrefix: "x".repeat(21) },
+        },
+      ])
+    ).toThrow();
+  });
+
   it("should accept an empty schema", () => {
     expect(() => validateDataSchema([])).not.toThrow();
   });
@@ -202,6 +230,34 @@ describe("validateDataViews", () => {
       ],
     },
   };
+
+  it("should accept a title column entry, but not a title sort", () => {
+    expect(() =>
+      validateDataViews(
+        [
+          {
+            ...validView,
+            columns: [
+              ...validView.columns,
+              { propertyId: TITLE_COLUMN_ID, visible: true, width: 240 },
+            ],
+          },
+        ],
+        schema
+      )
+    ).not.toThrow();
+    expect(() =>
+      validateDataViews(
+        [
+          {
+            ...validView,
+            sorts: [{ propertyId: TITLE_COLUMN_ID, direction: "asc" as const }],
+          },
+        ],
+        schema
+      )
+    ).toThrow();
+  });
 
   it("should accept a valid view", () => {
     expect(() => validateDataViews([validView], schema)).not.toThrow();
@@ -784,28 +840,47 @@ describe("normalizedColumnsForView", () => {
     sorts: [],
   };
 
-  it("should return one column per property, in the view's order", () => {
+  it("should return the title column and one column per property, in the view's order", () => {
     const columns = normalizedColumnsForView(schema, view);
-    expect(columns.map((column) => column.propertyId)).toEqual(
-      orderedPropertiesForView(schema, view).map((property) => property.id)
-    );
-    expect(columns).toHaveLength(schema.length);
+    expect(columns.map((column) => column.propertyId)).toEqual([
+      TITLE_COLUMN_ID,
+      ...orderedPropertiesForView(schema, view).map((property) => property.id),
+    ]);
+    expect(columns).toHaveLength(schema.length + 1);
   });
 
   it("should preserve the settings of columns that already exist", () => {
     const columns = normalizedColumnsForView(schema, view);
-    expect(columns[0]).toEqual(view.columns[0]);
+    expect(columns[1]).toEqual(view.columns[0]);
   });
 
   it("should default properties without a column to visible", () => {
     const columns = normalizedColumnsForView(schema, view);
-    expect(columns.slice(1).every((column) => column.visible)).toBe(true);
+    expect(columns.slice(2).every((column) => column.visible)).toBe(true);
   });
 
   it("should cover the whole schema without a view", () => {
-    expect(normalizedColumnsForView(schema)).toEqual(
-      schema.map((property) => ({ propertyId: property.id, visible: true }))
-    );
+    expect(normalizedColumnsForView(schema)).toEqual([
+      { propertyId: TITLE_COLUMN_ID, visible: true },
+      ...schema.map((property) => ({ propertyId: property.id, visible: true })),
+    ]);
+  });
+
+  it("should keep the title column at its stored position", () => {
+    const reordered = {
+      ...view,
+      columns: [
+        { propertyId: textProperty.id, visible: true },
+        { propertyId: TITLE_COLUMN_ID, visible: true, width: 300 },
+      ],
+    };
+    const columns = normalizedColumnsForView(schema, reordered);
+    expect(columns[0].propertyId).toBe(textProperty.id);
+    expect(columns[1]).toEqual({
+      propertyId: TITLE_COLUMN_ID,
+      visible: true,
+      width: 300,
+    });
   });
 });
 

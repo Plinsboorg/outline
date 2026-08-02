@@ -209,6 +209,75 @@ describe("#databases.update", () => {
     expect(body.data.dataSchema[0].name).toEqual("Status");
   });
 
+  it("should rename the title column", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+
+    const res = await server.post("/api/databases.update", user, {
+      body: { id: database.id, titleName: "Task" },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(body.data.titleName).toEqual("Task");
+
+    // clearing restores the default
+    const cleared = await server.post("/api/databases.update", user, {
+      body: { id: database.id, titleName: null },
+    });
+    expect((await cleared.json()).data.titleName).toBeNull();
+  });
+
+  it("should backfill auto numbers in creation order when enabled", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const propertyId = randomUUID();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      dataSchema: [{ id: propertyId, name: "ID", type: PropertyType.Number }],
+    });
+    const first = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+      createdAt: new Date("2026-01-01"),
+      updatedAt: new Date("2026-01-01"),
+    });
+    const second = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+      createdAt: new Date("2026-01-02"),
+      updatedAt: new Date("2026-01-02"),
+    });
+
+    const res = await server.post("/api/databases.update", user, {
+      body: {
+        id: database.id,
+        dataSchema: [
+          {
+            id: propertyId,
+            name: "ID",
+            type: PropertyType.Number,
+            config: { autoNumber: true },
+          },
+        ],
+      },
+    });
+    expect(res.status).toEqual(200);
+
+    await first.reload();
+    await second.reload();
+    expect(first.properties[propertyId]).toEqual(1);
+    expect(second.properties[propertyId]).toEqual(2);
+  });
+
   it("should reject a view referencing an unknown property", async () => {
     const { team, user, collection } = await buildEnabledTeam();
     const database = await buildDatabase({

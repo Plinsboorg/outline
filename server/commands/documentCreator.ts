@@ -1,6 +1,6 @@
 import type { Optional } from "utility-types";
 import { TextHelper } from "@shared/utils/TextHelper";
-import { Collection, Document, type Template } from "@server/models";
+import { Collection, Database, Document, type Template } from "@server/models";
 import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import { ProsemirrorHelper } from "@server/models/helpers/ProsemirrorHelper";
 import { authorize } from "@server/policies";
@@ -220,6 +220,18 @@ export default async function documentCreator(
   const databaseIndex = databaseId
     ? await Document.nextDatabaseIndex(databaseId, transaction)
     : null;
+
+  // new rows receive the next value of each auto-numbered property; values
+  // passed by the caller (e.g. an import) win over the generated ones
+  if (databaseId) {
+    const database = await Database.findByPk(databaseId, { transaction });
+    const autoNumbers = database
+      ? await database.nextAutoNumbers(transaction)
+      : {};
+    if (Object.keys(autoNumbers).length > 0) {
+      properties = { ...autoNumbers, ...properties };
+    }
+  }
 
   const document = Document.build({
     id,

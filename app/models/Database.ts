@@ -34,6 +34,11 @@ export default class Database extends ParanoidModel {
   @observable
   fullWidth: boolean;
 
+  /** A custom display name for the title column; null means "Title". */
+  @Field
+  @observable
+  titleName: string | null;
+
   /** The collection this database belongs to. */
   @Field
   @observable

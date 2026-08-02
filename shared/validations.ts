@@ -116,6 +116,9 @@ export const PropertyValidation = {
   /** The maximum length of a text or url property value */
   maxValueLength: 4096,
 
+  /** The maximum length of an auto-number prefix */
+  maxAutoNumberPrefixLength: 20,
+
   /** The maximum number of documents a relation property value may reference */
   maxRelations: 50,
 };

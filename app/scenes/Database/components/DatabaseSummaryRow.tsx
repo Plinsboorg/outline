@@ -13,6 +13,8 @@ import { InputSelect } from "~/components/InputSelect";
 type Props = {
   /** The properties rendered as columns, in the same order as the table. */
   properties: Property[];
+  /** The position of the title column among the visible columns. */
+  titleIndex: number;
   /** The active view, holding each column's chosen summary. */
   view?: DataView;
   /** The computed summary values, keyed by property id. */
@@ -38,6 +40,7 @@ const NONE = "";
  */
 function DatabaseSummaryRow({
   properties,
+  titleIndex,
   view,
   summaries,
   canEdit,
@@ -65,48 +68,51 @@ function DatabaseSummaryRow({
     return null;
   }
 
+  const cells = properties.map((property) => {
+    const available = summaryAggregationsForProperty(property);
+    const selected = summaryFor(property.id);
+    const value = summaries?.[property.id];
+
+    return (
+      <SummaryCell key={property.id}>
+        {canEdit && available.length > 0 ? (
+          <InputSelect
+            options={[
+              { type: "item" as const, label: t("None"), value: NONE },
+              ...available.map((aggregation) => ({
+                type: "item" as const,
+                label: labels[aggregation],
+                value: aggregation,
+              })),
+            ]}
+            value={selected ?? NONE}
+            onChange={(next) =>
+              onChange(
+                property.id,
+                next === NONE ? null : (next as SummaryAggregation)
+              )
+            }
+            label={t("Summary")}
+            labelHidden
+            short
+          />
+        ) : null}
+        {selected && (
+          <Value>
+            <Label>{labels[selected]}</Label>
+            {formatValue(value, selected)}
+          </Value>
+        )}
+      </SummaryCell>
+    );
+  });
+  // the title column has no summary, but its cell keeps the others aligned
+  cells.splice(titleIndex, 0, <SummaryCell key="title" />);
+
   return (
     <tr>
       {hasGripColumn && <SummaryCell />}
-      <SummaryCell />
-      {properties.map((property) => {
-        const available = summaryAggregationsForProperty(property);
-        const selected = summaryFor(property.id);
-        const value = summaries?.[property.id];
-
-        return (
-          <SummaryCell key={property.id}>
-            {canEdit && available.length > 0 ? (
-              <InputSelect
-                options={[
-                  { type: "item" as const, label: t("None"), value: NONE },
-                  ...available.map((aggregation) => ({
-                    type: "item" as const,
-                    label: labels[aggregation],
-                    value: aggregation,
-                  })),
-                ]}
-                value={selected ?? NONE}
-                onChange={(next) =>
-                  onChange(
-                    property.id,
-                    next === NONE ? null : (next as SummaryAggregation)
-                  )
-                }
-                label={t("Summary")}
-                labelHidden
-                short
-              />
-            ) : null}
-            {selected && (
-              <Value>
-                <Label>{labels[selected]}</Label>
-                {formatValue(value, selected)}
-              </Value>
-            )}
-          </SummaryCell>
-        );
-      })}
+      {cells}
       {hasControlsColumn && <SummaryCell />}
     </tr>
   );

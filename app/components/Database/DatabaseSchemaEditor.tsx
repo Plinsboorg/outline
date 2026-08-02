@@ -197,6 +197,7 @@ function DatabaseSchemaEditor({ databaseId, onSubmit }: Props) {
           property.type === PropertyType.MultiSelect;
         const isRelation = property.type === PropertyType.Relation;
         const isRollup = property.type === PropertyType.Rollup;
+        const isNumber = property.type === PropertyType.Number;
         const relationProperties = draft.filter(
           (item) => item.type === PropertyType.Relation
         );
@@ -341,6 +342,37 @@ function DatabaseSchemaEditor({ databaseId, onSubmit }: Props) {
                 )}
               </Flex>
             )}
+            {isNumber && (
+              <Flex align="center" gap={8}>
+                <Switch
+                  label={t("Number rows automatically")}
+                  labelPosition="right"
+                  checked={!!property.config?.autoNumber}
+                  onChange={(checked) =>
+                    updateConfig(index, {
+                      autoNumber: checked || undefined,
+                      autoNumberPrefix: checked
+                        ? property.config?.autoNumberPrefix
+                        : undefined,
+                    })
+                  }
+                  inForm={false}
+                />
+                {property.config?.autoNumber && (
+                  <PrefixInput
+                    value={property.config?.autoNumberPrefix ?? ""}
+                    placeholder={t("Prefix")}
+                    maxLength={PropertyValidation.maxAutoNumberPrefixLength}
+                    onChange={(ev: React.ChangeEvent<HTMLInputElement>) =>
+                      updateConfig(index, {
+                        autoNumberPrefix: ev.target.value || undefined,
+                      })
+                    }
+                    margin={0}
+                  />
+                )}
+              </Flex>
+            )}
             {supportsOptions && (
               <PropertyOptionsEditor
                 options={property.options ?? []}
@@ -393,6 +425,11 @@ const PropertyRow = styled(Flex)`
 
 const NameInput = styled(Input)`
   flex-grow: 1;
+`;
+
+const PrefixInput = styled(Input)`
+  width: 120px;
+  flex-shrink: 0;
 `;
 
 export default observer(DatabaseSchemaEditor);

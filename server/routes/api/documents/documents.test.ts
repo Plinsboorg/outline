@@ -3531,6 +3531,50 @@ describe("#documents.create", () => {
     ).not.toEqual(true);
   });
 
+  it("should assign the next value of an auto-numbered property to a new row", async () => {
+    const team = await buildTeam({
+      preferences: { documentDatabases: true },
+    });
+    const user = await buildUser({ teamId: team.id });
+    const collection = await buildCollection({
+      teamId: team.id,
+      userId: user.id,
+    });
+    const propertyId = randomUUID();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      dataSchema: [
+        {
+          id: propertyId,
+          name: "ID",
+          type: PropertyType.Number,
+          config: { autoNumber: true, autoNumberPrefix: "HW-" },
+        },
+      ],
+    });
+    await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+      properties: { [propertyId]: 4 },
+    });
+
+    const res = await server.post("/api/documents.create", user, {
+      body: {
+        title: "Row",
+        collectionId: collection.id,
+        databaseId: database.id,
+        publish: true,
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(body.data.properties[propertyId]).toEqual(5);
+  });
+
   it("should create a row in a private collection for a member", async () => {
     const team = await buildTeam({
       preferences: { documentDatabases: true },

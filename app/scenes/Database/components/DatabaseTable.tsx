@@ -21,7 +21,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { observer } from "mobx-react";
 import { PlusIcon } from "outline-icons";
-import type * as React from "react";
+import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -36,6 +36,8 @@ import type {
   SummaryAggregation,
 } from "@shared/types";
 import { errToString } from "@shared/utils/error";
+import { TITLE_COLUMN_ID } from "@shared/utils/properties";
+import { PropertyValidation } from "@shared/validations";
 import type Document from "~/models/Document";
 import PropertyValueEditor from "~/components/DocumentProperties/PropertyValueEditor";
 import Flex from "~/components/Flex";
@@ -52,6 +54,14 @@ type Props = {
   rows: Document[];
   /** The properties to render as columns, in order. */
   properties: Property[];
+  /** The position of the title column among the visible columns. */
+  titleIndex: number;
+  /** The display name of the title column; undefined means "Title". */
+  titleName?: string;
+  /** Callback renaming the title column; absent when not allowed. */
+  onRenameTitle?: (name: string) => void;
+  /** Callback persisting a column's width; absent when not allowed. */
+  onResizeColumn?: (columnId: string, width: number) => void;
   /** The active sort, reflected in the column headers. */
   sort?: DataViewSort;
   /** Callback when a sort direction is chosen for a property; null clears. */
@@ -105,6 +115,10 @@ type Props = {
 function DatabaseTable({
   rows,
   properties,
+  titleIndex,
+  titleName,
+  onRenameTitle,
+  onResizeColumn,
   sort,
   onSetSort,
   hasFilter,
@@ -135,6 +149,31 @@ function DatabaseTable({
     (hasControlsColumn ? 1 : 0) +
     (hasGripColumn ? 1 : 0);
 
+  // widths preview locally while a resize drag is in progress; the width is
+  // written to the view's column entry once, when the pointer is released
+  const [draftWidths, setDraftWidths] = React.useState<Record<string, number>>(
+    {}
+  );
+
+  const widthFor = (columnId: string): number | undefined =>
+    draftWidths[columnId] ??
+    view?.columns.find((column) => column.propertyId === columnId)?.width;
+
+  const handleResizeDraft = React.useCallback(
+    (columnId: string, width: number) => {
+      setDraftWidths((current) => ({ ...current, [columnId]: width }));
+    },
+    []
+  );
+
+  const handleResizeCommit = React.useCallback(
+    (columnId: string, width: number) => {
+      setDraftWidths((current) => ({ ...current, [columnId]: width }));
+      onResizeColumn?.(columnId, width);
+    },
+    [onResizeColumn]
+  );
+
   const sensors = useSensors(
     // a small distance so a plain click still reaches the header menu
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -157,24 +196,44 @@ function DatabaseTable({
     }
   };
 
+  // the title column sits among the property columns at the view's chosen
+  // position, dragging and resizing like any of them
+  const columnIds = properties.map((property) => property.id);
+  columnIds.splice(titleIndex, 0, TITLE_COLUMN_ID);
+
+  const headerCells = properties.map((property) => (
+    <DatabaseTableHeader
+      key={property.id}
+      property={property}
+      sort={sort}
+      onSetSort={onSetSort}
+      onUpdateProperty={onUpdateProperty}
+      onHideProperty={onHideProperty}
+      onDeleteProperty={onDeleteProperty}
+      isSortable={!!onMoveProperty}
+      width={widthFor(property.id)}
+      onResizeDraft={onResizeColumn ? handleResizeDraft : undefined}
+      onResizeCommit={onResizeColumn ? handleResizeCommit : undefined}
+    />
+  ));
+  headerCells.splice(
+    titleIndex,
+    0,
+    <DatabaseTableTitleHeader
+      key={TITLE_COLUMN_ID}
+      name={titleName}
+      onRename={onRenameTitle}
+      isSortable={!!onMoveProperty}
+      width={widthFor(TITLE_COLUMN_ID)}
+      onResizeDraft={onResizeColumn ? handleResizeDraft : undefined}
+      onResizeCommit={onResizeColumn ? handleResizeCommit : undefined}
+    />
+  );
+
   const header = (
     <tr>
       {hasGripColumn && <GripHeaderCell as="th" />}
-      <HeaderCell as="th" $minWidth={220}>
-        {t("Title")}
-      </HeaderCell>
-      {properties.map((property) => (
-        <DatabaseTableHeader
-          key={property.id}
-          property={property}
-          sort={sort}
-          onSetSort={onSetSort}
-          onUpdateProperty={onUpdateProperty}
-          onHideProperty={onHideProperty}
-          onDeleteProperty={onDeleteProperty}
-          isSortable={!!onMoveProperty}
-        />
-      ))}
+      {headerCells}
       {hasControlsColumn && (
         <ControlsCell as="th">
           <Flex align="center" gap={2}>
@@ -198,6 +257,7 @@ function DatabaseTable({
           key={document.id}
           document={document}
           properties={properties}
+          titleIndex={titleIndex}
           isEditingTitle={document.id === newRowId}
           onTitleDone={onNewRowDone}
           hasControlsColumn={hasControlsColumn}
@@ -242,7 +302,7 @@ function DatabaseTable({
           onDragEnd={handleColumnDragEnd}
         >
           <SortableContext
-            items={properties.map((property) => property.id)}
+            items={columnIds}
             strategy={horizontalListSortingStrategy}
           >
             <thead>{header}</thead>
@@ -264,6 +324,7 @@ function DatabaseTable({
         <tfoot>
           <DatabaseSummaryRow
             properties={properties}
+            titleIndex={titleIndex}
             view={view}
             summaries={summaries}
             canEdit={canEditSummaries}
@@ -289,6 +350,9 @@ function DatabaseTableHeader({
   onHideProperty,
   onDeleteProperty,
   isSortable,
+  width,
+  onResizeDraft,
+  onResizeCommit,
 }: {
   property: Property;
   sort?: DataViewSort;
@@ -297,6 +361,9 @@ function DatabaseTableHeader({
   onHideProperty: (propertyId: string) => void;
   onDeleteProperty: (propertyId: string) => void;
   isSortable: boolean;
+  width?: number;
+  onResizeDraft?: (columnId: string, width: number) => void;
+  onResizeCommit?: (columnId: string, width: number) => void;
 }) {
   const { t } = useTranslation();
   const {
@@ -336,6 +403,7 @@ function DatabaseTableHeader({
       $flush={!!onUpdateProperty}
       $dragging={isDragging}
       $dropSide={dropSide}
+      style={columnWidthStyle(width)}
     >
       {isSortable && (
         <ColumnGrip
@@ -343,6 +411,13 @@ function DatabaseTableHeader({
           {...listeners}
           aria-label={t("Reorder column")}
           onClick={(ev: React.MouseEvent) => ev.stopPropagation()}
+        />
+      )}
+      {onResizeDraft && onResizeCommit && (
+        <ColumnResizeHandle
+          columnId={property.id}
+          onDraft={onResizeDraft}
+          onCommit={onResizeCommit}
         />
       )}
       {onUpdateProperty ? (
@@ -366,9 +441,193 @@ function DatabaseTableHeader({
   );
 }
 
+/** The width every column may be resized down to but not below. */
+const MIN_COLUMN_WIDTH = 80;
+
+/** Splices the title cell into a row's property cells at the title's index. */
+function cellsWithTitle(
+  cells: React.ReactNode[],
+  titleIndex: number,
+  titleCell: React.ReactNode
+): React.ReactNode[] {
+  const result = [...cells];
+  result.splice(titleIndex, 0, titleCell);
+  return result;
+}
+
+/** Builds the inline style pinning a column to its stored width, if any. */
+function columnWidthStyle(width?: number): React.CSSProperties | undefined {
+  return width ? { width, minWidth: width, maxWidth: width } : undefined;
+}
+
+/**
+ * The title column's header. The title is not a schema property but its
+ * column drags and resizes like one, and clicking the header renames it
+ * inline when allowed.
+ */
+function DatabaseTableTitleHeader({
+  name,
+  onRename,
+  isSortable,
+  width,
+  onResizeDraft,
+  onResizeCommit,
+}: {
+  name?: string;
+  onRename?: (name: string) => void;
+  isSortable: boolean;
+  width?: number;
+  onResizeDraft?: (columnId: string, width: number) => void;
+  onResizeCommit?: (columnId: string, width: number) => void;
+}) {
+  const { t } = useTranslation();
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState("");
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    isDragging,
+    index,
+    activeIndex,
+    overIndex,
+  } = useSortable({ id: TITLE_COLUMN_ID, disabled: !isSortable });
+
+  const isDropTarget = activeIndex !== -1 && overIndex === index && !isDragging;
+  const dropSide = isDropTarget
+    ? activeIndex > index
+      ? "left"
+      : "right"
+    : undefined;
+
+  const label = name || t("Title");
+
+  const handleStartEditing = () => {
+    setDraft(name ?? "");
+    setIsEditing(true);
+  };
+
+  const handleCommit = () => {
+    setIsEditing(false);
+    const next = draft.trim();
+    if (next !== (name ?? "")) {
+      onRename?.(next);
+    }
+  };
+
+  const handleKeyDown = (ev: React.KeyboardEvent<HTMLInputElement>) => {
+    if (ev.nativeEvent.isComposing) {
+      return;
+    }
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      handleCommit();
+    }
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      setIsEditing(false);
+    }
+  };
+
+  return (
+    <HeaderCell
+      as="th"
+      ref={setNodeRef}
+      $minWidth={width ? undefined : 220}
+      $flush={!!onRename}
+      $dragging={isDragging}
+      $dropSide={dropSide}
+      style={columnWidthStyle(width)}
+    >
+      {isSortable && (
+        <ColumnGrip
+          {...attributes}
+          {...listeners}
+          aria-label={t("Reorder column")}
+          onClick={(ev: React.MouseEvent) => ev.stopPropagation()}
+        />
+      )}
+      {onResizeDraft && onResizeCommit && (
+        <ColumnResizeHandle
+          columnId={TITLE_COLUMN_ID}
+          onDraft={onResizeDraft}
+          onCommit={onResizeCommit}
+        />
+      )}
+      {isEditing ? (
+        <TitleNameInput
+          autoFocus
+          value={draft}
+          placeholder={t("Title")}
+          maxLength={PropertyValidation.maxNameLength}
+          onChange={(ev) => setDraft(ev.target.value)}
+          onBlur={handleCommit}
+          onKeyDown={handleKeyDown}
+        />
+      ) : onRename ? (
+        <TitleHeaderButton type="button" onClick={handleStartEditing}>
+          {label}
+        </TitleHeaderButton>
+      ) : (
+        label
+      )}
+    </HeaderCell>
+  );
+}
+
+/**
+ * The draggable right edge of a header cell. Dragging previews the width on
+ * the column and persists it once the pointer is released.
+ */
+function ColumnResizeHandle({
+  columnId,
+  onDraft,
+  onCommit,
+}: {
+  columnId: string;
+  onDraft: (columnId: string, width: number) => void;
+  onCommit: (columnId: string, width: number) => void;
+}) {
+  const handlePointerDown = (ev: React.PointerEvent<HTMLDivElement>) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const handle = ev.currentTarget;
+    const cell = handle.closest("th");
+    if (!cell) {
+      return;
+    }
+    const startX = ev.clientX;
+    const startWidth = cell.getBoundingClientRect().width;
+    let width = Math.round(startWidth);
+
+    const handleMove = (event: PointerEvent) => {
+      width = Math.max(
+        MIN_COLUMN_WIDTH,
+        Math.round(startWidth + event.clientX - startX)
+      );
+      onDraft(columnId, width);
+    };
+    const handleUp = () => {
+      handle.removeEventListener("pointermove", handleMove);
+      handle.removeEventListener("pointerup", handleUp);
+      handle.removeEventListener("pointercancel", handleUp);
+      if (width !== Math.round(startWidth)) {
+        onCommit(columnId, width);
+      }
+    };
+    handle.setPointerCapture(ev.pointerId);
+    handle.addEventListener("pointermove", handleMove);
+    handle.addEventListener("pointerup", handleUp);
+    handle.addEventListener("pointercancel", handleUp);
+  };
+
+  return <ResizeGrip onPointerDown={handlePointerDown} aria-hidden />;
+}
+
 const DatabaseTableRow = observer(function DatabaseTableRow_({
   document,
   properties,
+  titleIndex,
   isEditingTitle,
   onTitleDone,
   hasControlsColumn,
@@ -377,6 +636,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
 }: {
   document: Document;
   properties: Property[];
+  titleIndex: number;
   isEditingTitle: boolean;
   onTitleDone: () => void;
   hasControlsColumn: boolean;
@@ -440,26 +700,31 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
           />
         </GripCell>
       )}
-      <TitleCell>
-        {isEditingTitle ? (
-          <TitleInputPadding>
-            <RowTitleInput document={document} onDone={onTitleDone} />
-          </TitleInputPadding>
-        ) : (
-          <TitleLink to={document.path}>{document.titleWithDefault}</TitleLink>
-        )}
-      </TitleCell>
-      {properties.map((property) => (
-        <Cell key={property.id}>
-          <PropertyValueEditor
-            property={property}
-            value={document.propertyValue(property.id)}
-            onChange={(value) => handleChange(property.id, value)}
-            readOnly={!can.update}
-            documentId={document.id}
-          />
-        </Cell>
-      ))}
+      {cellsWithTitle(
+        properties.map((property) => (
+          <Cell key={property.id}>
+            <PropertyValueEditor
+              property={property}
+              value={document.propertyValue(property.id)}
+              onChange={(value) => handleChange(property.id, value)}
+              readOnly={!can.update}
+              documentId={document.id}
+            />
+          </Cell>
+        )),
+        titleIndex,
+        <TitleCell key={TITLE_COLUMN_ID}>
+          {isEditingTitle ? (
+            <TitleInputPadding>
+              <RowTitleInput document={document} onDone={onTitleDone} />
+            </TitleInputPadding>
+          ) : (
+            <TitleLink to={document.path}>
+              {document.titleWithDefault}
+            </TitleLink>
+          )}
+        </TitleCell>
+      )}
       {hasControlsColumn && (
         <RowControlsCell>
           {onDelete && (
@@ -630,6 +895,57 @@ const ColumnGrip = styled.button.attrs({ type: "button" })`
 
 const TitleCell = styled(Cell)`
   padding: 0;
+`;
+
+/** The invisible drag strip along a header cell's right edge for resizing. */
+const ResizeGrip = styled.div`
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 2;
+  touch-action: none;
+
+  &:hover,
+  &:active {
+    background: ${s("accent")};
+    opacity: 0.5;
+  }
+`;
+
+/** The title header's click target, styled like a property header button. */
+const TitleHeaderButton = styled.button`
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 8px 10px;
+  cursor: var(--pointer);
+  display: flex;
+  width: 100%;
+  align-items: center;
+  text-align: left;
+
+  &:hover {
+    background: ${s("backgroundSecondary")};
+    color: ${s("text")};
+  }
+`;
+
+const TitleNameInput = styled.input`
+  border: 0;
+  outline: none;
+  background: none;
+  color: ${s("text")};
+  font: inherit;
+  width: 100%;
+  padding: 8px 10px;
+
+  &::placeholder {
+    color: ${s("placeholder")};
+  }
 `;
 
 const TitleInputPadding = styled.div`

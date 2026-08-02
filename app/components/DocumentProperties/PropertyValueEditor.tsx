@@ -111,7 +111,17 @@ function PropertyValueEditor({
         />
       );
 
-    case PropertyType.Number:
+    case PropertyType.Number: {
+      // auto-numbered values are assigned by the server and never edited
+      if (property.config?.autoNumber) {
+        return typeof value === "number" ? (
+          <AutoNumberValue>
+            {`${property.config.autoNumberPrefix ?? ""}${value}`}
+          </AutoNumberValue>
+        ) : (
+          <Placeholder>–</Placeholder>
+        );
+      }
       return (
         <NudeInput
           type="number"
@@ -122,6 +132,7 @@ function PropertyValueEditor({
           disabled={readOnly}
         />
       );
+    }
 
     case PropertyType.Checkbox:
       return (
@@ -523,6 +534,10 @@ function formatRollupValue(value: number): string {
 const RollupValue = styled.span`
   padding: 4px 6px;
   color: ${s("textSecondary")};
+`;
+
+const AutoNumberValue = styled.span`
+  padding: 4px 6px;
 `;
 
 const NudeInput = styled.input`

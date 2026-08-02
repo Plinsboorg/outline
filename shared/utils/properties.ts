@@ -20,6 +20,13 @@ import {
 import { DataViewValidation, PropertyValidation } from "../validations";
 
 /**
+ * The column id representing the built-in title column in a view's column
+ * list. The title is not a schema property — this sentinel lets views order
+ * and size the title column alongside property columns.
+ */
+export const TITLE_COLUMN_ID = "title";
+
+/**
  * Validates a database's data schema, the array of property definitions that
  * describes the columns of the database.
  *
@@ -501,25 +508,41 @@ export function visiblePropertiesForView(
 }
 
 /**
- * Builds a complete column list for a view: one entry per schema property, in
- * the view's current order, preserving each column's existing settings. Used
- * before writing a reordered column list so the stored order is unambiguous.
+ * Builds a complete column list for a view: the title column and one entry
+ * per schema property, in the view's current order, preserving each column's
+ * existing settings. The title column keeps its stored position, defaulting
+ * to first. Used before writing a reordered column list so the stored order
+ * is unambiguous.
  *
  * @param schema the database's data schema.
  * @param view the view to normalize the columns of, if any.
- * @returns a column entry for every property in the schema.
+ * @returns a column entry for the title and every property in the schema.
  */
 export function normalizedColumnsForView(
   schema: Property[],
   view?: DataView | null
 ): DataViewColumn[] {
-  const existing = new Map(
-    (view?.columns ?? []).map((column) => [column.propertyId, column])
-  );
-  return orderedPropertiesForView(schema, view).map(
-    (property) =>
-      existing.get(property.id) ?? { propertyId: property.id, visible: true }
-  );
+  const byId = new Map(schema.map((property) => [property.id, property]));
+  const seen = new Set<string>();
+  const ordered: DataViewColumn[] = [];
+
+  for (const column of view?.columns ?? []) {
+    const known =
+      column.propertyId === TITLE_COLUMN_ID || byId.has(column.propertyId);
+    if (known && !seen.has(column.propertyId)) {
+      seen.add(column.propertyId);
+      ordered.push(column);
+    }
+  }
+  if (!seen.has(TITLE_COLUMN_ID)) {
+    ordered.unshift({ propertyId: TITLE_COLUMN_ID, visible: true });
+  }
+  for (const property of schema) {
+    if (!seen.has(property.id)) {
+      ordered.push({ propertyId: property.id, visible: true });
+    }
+  }
+  return ordered;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -577,6 +600,28 @@ function validateProperty(property: unknown): asserts property is Property {
       typeof property.config.allowMultiple !== "boolean"
     ) {
       throw new Error("Property config allowMultiple must be a boolean");
+    }
+    if (
+      property.config.autoNumber !== undefined &&
+      typeof property.config.autoNumber !== "boolean"
+    ) {
+      throw new Error("Property config autoNumber must be a boolean");
+    }
+    if (
+      property.config.autoNumber &&
+      (property.type as PropertyType) !== PropertyType.Number
+    ) {
+      throw new Error("Only number properties can auto-number");
+    }
+    if (
+      property.config.autoNumberPrefix !== undefined &&
+      (typeof property.config.autoNumberPrefix !== "string" ||
+        property.config.autoNumberPrefix.length >
+          PropertyValidation.maxAutoNumberPrefixLength)
+    ) {
+      throw new Error(
+        `Property config autoNumberPrefix must be a string of ${PropertyValidation.maxAutoNumberPrefixLength} or fewer characters`
+      );
     }
   }
 
@@ -693,7 +738,11 @@ function validateDataView(
     if (!isPlainObject(column)) {
       throw new Error("Each view column must be an object");
     }
-    validatePropertyReference(column.propertyId, knownPropertyIds);
+    // the title column participates in ordering and sizing without being a
+    // schema property, so it is exempt from the known-property check
+    if (column.propertyId !== TITLE_COLUMN_ID) {
+      validatePropertyReference(column.propertyId, knownPropertyIds);
+    }
     if (typeof column.visible !== "boolean") {
       throw new Error("View column visible must be a boolean");
     }

@@ -541,6 +541,13 @@ export type PropertyOption = {
 export type PropertyConfig = {
   /** Whether date properties include a time component. */
   dateIncludesTime?: boolean;
+  /**
+   * Whether a number property is assigned automatically: each new row gets
+   * the next number, counting up from 1. Auto-numbered values are read-only.
+   */
+  autoNumber?: boolean;
+  /** A prefix shown before auto-numbered values, e.g. "HW-" for HW-1. */
+  autoNumberPrefix?: string;
   /** The database a relation property references rows from. */
   targetDatabaseId?: string;
   /**

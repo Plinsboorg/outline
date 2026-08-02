@@ -1,5 +1,10 @@
 import { isNil } from "es-toolkit/compat";
-import type { InferAttributes, InferCreationAttributes } from "sequelize";
+import type {
+  InferAttributes,
+  InferCreationAttributes,
+  Transaction,
+} from "sequelize";
+import { QueryTypes } from "sequelize";
 import {
   AllowNull,
   BelongsTo,
@@ -14,15 +19,16 @@ import {
   Table,
 } from "sequelize-typescript";
 import { v4 as uuidv4 } from "uuid";
-import type { DataView, Property } from "@shared/types";
+import type { DataView, DocumentProperties, Property } from "@shared/types";
 import { DataViewType, PropertyType } from "@shared/types";
 import {
+  TITLE_COLUMN_ID,
   pruneFilterReferences,
   removeFilterReferences,
   validateDataSchema,
   validateDataViews,
 } from "@shared/utils/properties";
-import { DatabaseValidation } from "@shared/validations";
+import { DatabaseValidation, PropertyValidation } from "@shared/validations";
 import Collection from "./Collection";
 import Document from "./Document";
 import Team from "./Team";
@@ -72,6 +78,15 @@ class Database extends ParanoidModel<
   @Default(false)
   @Column(DataType.BOOLEAN)
   fullWidth: boolean;
+
+  /** A custom display name for the title column; null means "Title". */
+  @AllowNull
+  @Length({
+    max: PropertyValidation.maxNameLength,
+    msg: `titleName must be ${PropertyValidation.maxNameLength} characters or less`,
+  })
+  @Column(DataType.STRING)
+  titleName: string | null;
 
   /** When the database was archived, hiding it and its rows. */
   @AllowNull
@@ -223,7 +238,11 @@ class Database extends ParanoidModel<
     const known = new Set(this.dataSchema.map((property) => property.id));
     this.views = this.views.map((view) => ({
       ...view,
-      columns: view.columns.filter((column) => known.has(column.propertyId)),
+      // the title column is not a schema property but may hold order/width
+      columns: view.columns.filter(
+        (column) =>
+          known.has(column.propertyId) || column.propertyId === TITLE_COLUMN_ID
+      ),
       sorts: view.sorts.filter((sort) => known.has(sort.propertyId)),
       filter: view.filter
         ? pruneFilterReferences(view.filter, known)
@@ -286,6 +305,75 @@ class Database extends ParanoidModel<
   };
 
   /**
+   * Computes the next value for each auto-numbered property of this database,
+   * counting past soft-deleted rows so numbers are never reused.
+   *
+   * @param transaction The transaction to read within, if any
+   * @returns The next values, keyed by property id.
+   */
+  nextAutoNumbers = async (
+    transaction?: Transaction
+  ): Promise<DocumentProperties> => {
+    const result: DocumentProperties = {};
+    for (const property of this.dataSchema) {
+      if (
+        property.type !== PropertyType.Number ||
+        !property.config?.autoNumber
+      ) {
+        continue;
+      }
+      result[property.id] =
+        (await this.maxAutoNumber(property.id, transaction)) + 1;
+    }
+    return result;
+  };
+
+  /**
+   * Assigns numbers to every row missing a value for the given auto-numbered
+   * properties, in row creation order, continuing after the highest existing
+   * number. Called when auto-numbering is enabled on an existing property.
+   *
+   * @param properties The auto-numbered properties to backfill
+   * @param options The transaction to write within, if any
+   */
+  assignAutoNumbers = async (
+    properties: Property[],
+    { transaction }: { transaction?: Transaction } = {}
+  ): Promise<void> => {
+    if (properties.length === 0) {
+      return;
+    }
+    // unscoped so draft rows are numbered too, and no joins are dragged in
+    const rows = await Document.unscoped().findAll({
+      where: { databaseId: this.id },
+      order: [["createdAt", "ASC"]],
+      transaction,
+    });
+    for (const property of properties) {
+      let next = (await this.maxAutoNumber(property.id, transaction)) + 1;
+      for (const row of rows) {
+        if (typeof row.properties?.[property.id] === "number") {
+          continue;
+        }
+        row.properties = { ...row.properties, [property.id]: next };
+        next += 1;
+      }
+    }
+    await Promise.all(
+      rows
+        .filter((row) => row.changed("properties"))
+        .map((row) =>
+          row.save({
+            transaction,
+            hooks: false,
+            silent: true,
+            fields: ["properties"],
+          })
+        )
+    );
+  };
+
+  /**
    * Builds the table view a new database starts with, showing every property.
    *
    * @param schema The data schema the view displays
@@ -305,6 +393,26 @@ class Database extends ParanoidModel<
     })),
     sorts: [],
   });
+
+  /**
+   * Returns the highest number stored for a property across every row of
+   * this database, including soft-deleted rows.
+   */
+  private maxAutoNumber = async (
+    propertyId: string,
+    transaction?: Transaction
+  ): Promise<number> => {
+    const rows = await this.sequelize.query<{ max: string }>(
+      `SELECT COALESCE(MAX(CASE WHEN jsonb_typeof(properties -> :propertyId) = 'number' THEN (properties ->> :propertyId)::numeric END), 0) AS max
+       FROM documents WHERE "databaseId" = :databaseId`,
+      {
+        replacements: { propertyId, databaseId: this.id },
+        type: QueryTypes.SELECT,
+        transaction,
+      }
+    );
+    return Number(rows[0]?.max ?? 0);
+  };
 }
 
 export default Database;

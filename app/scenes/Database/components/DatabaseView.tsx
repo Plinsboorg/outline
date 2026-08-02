@@ -20,6 +20,7 @@ import type {
 import { DataViewType, PropertyType } from "@shared/types";
 import { errToString } from "@shared/utils/error";
 import {
+  TITLE_COLUMN_ID,
   isGroupableProperty,
   normalizedColumnsForView,
   orderedPropertiesForView,
@@ -99,6 +100,16 @@ function DatabaseView({ database }: Props) {
   const activeView = database.resolveView(persistedViewId);
   const orderedProperties = orderedPropertiesForView(schema, activeView);
   const visibleProperties = visiblePropertiesForView(schema, activeView);
+
+  // where the title column sits among the visible columns of the table view —
+  // it can be dragged behind property columns like any other
+  const visibleColumnIds = new Set<string>([
+    TITLE_COLUMN_ID,
+    ...visibleProperties.map((property) => property.id),
+  ]);
+  const titleIndex = normalizedColumnsForView(schema, activeView)
+    .filter((column) => visibleColumnIds.has(column.propertyId))
+    .findIndex((column) => column.propertyId === TITLE_COLUMN_ID);
 
   const sort: DataViewSort | undefined = activeView?.sorts?.[0];
   const filter = activeView?.filter?.conditions?.[0] as
@@ -414,6 +425,28 @@ function DatabaseView({ database }: Props) {
     [rows, databases, database]
   );
 
+  const handleResizeColumn = React.useCallback(
+    (columnId: string, width: number) => {
+      const columns = normalizedColumnsForView(schema, activeView).map(
+        (column) =>
+          column.propertyId === columnId ? { ...column, width } : column
+      );
+      void updateActiveView({ columns });
+    },
+    [schema, activeView, updateActiveView]
+  );
+
+  const handleRenameTitle = React.useCallback(
+    async (name: string) => {
+      try {
+        await database.save({ titleName: name });
+      } catch (error) {
+        toast.error(errToString(error));
+      }
+    },
+    [database]
+  );
+
   const handleMoveProperty = React.useCallback(
     (propertyId: string, overPropertyId: string) => {
       const columns = normalizedColumnsForView(schema, activeView);
@@ -661,6 +694,10 @@ function DatabaseView({ database }: Props) {
         <DatabaseTable
           rows={rows}
           properties={visibleProperties}
+          titleIndex={titleIndex}
+          titleName={database.titleName ?? undefined}
+          onRenameTitle={can.update ? handleRenameTitle : undefined}
+          onResizeColumn={can.update ? handleResizeColumn : undefined}
           sort={sort}
           onSetSort={handleSetSort}
           hasFilter={!!filter}

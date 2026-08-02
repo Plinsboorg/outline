@@ -7,7 +7,7 @@ import {
   RollupAggregation,
   SummaryAggregation,
 } from "@shared/types";
-import { DatabaseValidation } from "@shared/validations";
+import { DatabaseValidation, PropertyValidation } from "@shared/validations";
 import { zodIconType, zodIdType } from "@server/utils/zod";
 import { ValidateColor } from "@server/validation";
 import { BaseSchema } from "../schema";
@@ -40,6 +40,11 @@ export const PropertySchema = z.object({
       inversePropertyId: z.uuid().optional(),
       limitToViewId: z.uuid().optional(),
       allowMultiple: z.boolean().optional(),
+      autoNumber: z.boolean().optional(),
+      autoNumberPrefix: z
+        .string()
+        .max(PropertyValidation.maxAutoNumberPrefixLength)
+        .optional(),
       relationPropertyId: z.string().optional(),
       rollupPropertyId: z.string().optional(),
       rollupAggregation: z.enum(RollupAggregation).optional(),
@@ -136,6 +141,8 @@ export const DatabasesUpdateSchema = BaseSchema.extend({
       .nullish(),
     /** Whether the database's page ignores the usual reading width */
     fullWidth: z.boolean().optional(),
+    /** A custom display name for the title column; null restores "Title" */
+    titleName: z.string().max(PropertyValidation.maxNameLength).nullish(),
     /** Moves the database, and all of its rows, to another collection */
     collectionId: zodIdType().optional(),
     /** The typed property definitions describing the database's columns */

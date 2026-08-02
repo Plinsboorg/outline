@@ -65,6 +65,11 @@ export const PropertyValueLabel = observer(function PropertyValueLabel_({
         </a>
       ) : null;
 
+    case PropertyType.Number:
+      return typeof value === "number" ? (
+        <span>{`${property.config?.autoNumberPrefix ?? ""}${value}`}</span>
+      ) : null;
+
     case PropertyType.Image: {
       const src = typeof value === "string" ? sanitizeImageSrc(value) : "";
       return src ? <Thumbnail src={src} alt={property.name} /> : null;
