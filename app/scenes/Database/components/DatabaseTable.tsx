@@ -456,6 +456,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
             value={document.propertyValue(property.id)}
             onChange={(value) => handleChange(property.id, value)}
             readOnly={!can.update}
+            documentId={document.id}
           />
         </Cell>
       ))}

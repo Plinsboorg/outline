@@ -5,6 +5,7 @@ import {
   CheckboxIcon,
   EditIcon,
   HashtagIcon,
+  ImageIcon,
   LinkIcon,
   PlusIcon,
   TodoListIcon,
@@ -59,6 +60,7 @@ const simpleTypes: {
   { type: PropertyType.Date, label: "Date", icon: <CalendarIcon /> },
   { type: PropertyType.Url, label: "URL", icon: <LinkIcon /> },
   { type: PropertyType.Person, label: "Person", icon: <UserIcon /> },
+  { type: PropertyType.Image, label: "Image", icon: <ImageIcon /> },
 ];
 
 /**

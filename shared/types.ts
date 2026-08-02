@@ -513,6 +513,7 @@ export enum PropertyType {
   Date = "date",
   Url = "url",
   Person = "person",
+  Image = "image",
   Relation = "relation",
   Rollup = "rollup",
 }
@@ -579,7 +580,8 @@ export type Property = {
 
 /**
  * A single property value on a document. The runtime type depends on the
- * property definition: text/select/date/url/person store strings, number
+ * property definition: text/select/date/url/person store strings, image the
+ * URL of an uploaded attachment, number
  * stores a number, checkbox a boolean, and multiSelect an array of option ids.
  */
 export type PropertyValue = string | number | boolean | string[] | null;

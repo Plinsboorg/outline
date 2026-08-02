@@ -24,6 +24,7 @@ import {
   groupByProperty,
   groupOptionIdForValue,
 } from "@shared/utils/properties";
+import { sanitizeImageSrc } from "@shared/utils/urls";
 import type Document from "~/models/Document";
 import NudeButton from "~/components/NudeButton";
 import usePolicy from "~/hooks/usePolicy";
@@ -228,7 +229,18 @@ const BoardCard = observer(function BoardCard_({
       id: document.id,
       disabled: !can.update || isEditingTitle,
     });
-  const cardProperties = properties.filter((item) => item.id !== property.id);
+  // the first visible image property doubles as the card's cover image
+  const coverProperty = properties.find(
+    (item) => item.type === PropertyType.Image
+  );
+  const coverValue = coverProperty
+    ? document.propertyValue(coverProperty.id)
+    : undefined;
+  const coverSrc =
+    typeof coverValue === "string" ? sanitizeImageSrc(coverValue) : undefined;
+  const cardProperties = properties.filter(
+    (item) => item.id !== property.id && item.id !== coverProperty?.id
+  );
 
   return (
     <Card
@@ -242,6 +254,9 @@ const BoardCard = observer(function BoardCard_({
       {...listeners}
       {...attributes}
     >
+      {coverSrc && (
+        <CardCover src={coverSrc} alt={coverProperty?.name} draggable={false} />
+      )}
       {onDelete && (
         // the whole card is the drag handle, so the menu has to keep its own
         // pointer events away from the drag sensor
@@ -333,6 +348,16 @@ const Card = styled.div<{ $isDragging: boolean }>`
   opacity: ${(props) => (props.$isDragging ? 0.6 : 1)};
   position: relative;
   z-index: ${(props) => (props.$isDragging ? 2 : "auto")};
+`;
+
+/** The cover image bleeds to the card's edges, above its content. */
+const CardCover = styled.img`
+  display: block;
+  width: calc(100% + 20px);
+  height: 96px;
+  object-fit: cover;
+  margin: -8px -10px 6px;
+  border-radius: 5px 5px 0 0;
 `;
 
 /** The card's overflow menu, kept out of the way until the card is pointed at. */

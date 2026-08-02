@@ -77,6 +77,12 @@ const personProperty: Property = {
   type: PropertyType.Person,
 };
 
+const imageProperty: Property = {
+  id: uuidv4(),
+  name: "Cover",
+  type: PropertyType.Image,
+};
+
 const relationProperty: Property = {
   id: uuidv4(),
   name: "Linked",
@@ -93,6 +99,7 @@ const schema: Property[] = [
   dateProperty,
   urlProperty,
   personProperty,
+  imageProperty,
   relationProperty,
 ];
 
@@ -379,6 +386,14 @@ describe("coercePropertyValue", () => {
     );
     expect(coercePropertyValue(urlProperty, "")).toBeUndefined();
     expect(coercePropertyValue(urlProperty, 5)).toBeUndefined();
+  });
+
+  it("should validate image values", () => {
+    expect(
+      coercePropertyValue(imageProperty, "/api/attachments.redirect?id=abc")
+    ).toBe("/api/attachments.redirect?id=abc");
+    expect(coercePropertyValue(imageProperty, "")).toBeUndefined();
+    expect(coercePropertyValue(imageProperty, 5)).toBeUndefined();
   });
 
   it("should validate person values as UUIDs", () => {

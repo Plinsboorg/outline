@@ -42,6 +42,7 @@ function operatorsForType(type: PropertyType): FilterOperator[] {
       // rollups are computed at read time and cannot be queried
       return [];
     case PropertyType.Relation:
+    case PropertyType.Image:
       return [FilterOperator.IsEmpty, FilterOperator.IsNotEmpty];
     case PropertyType.Select:
     case PropertyType.Person:

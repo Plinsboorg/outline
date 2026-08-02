@@ -1,16 +1,19 @@
 import { observer } from "mobx-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import styled, { css } from "styled-components";
 import { propertyChipStyles } from "@shared/components/PropertyChip";
 import { s } from "@shared/styles";
 import type { Property, PropertyValue } from "@shared/types";
-import { PropertyType } from "@shared/types";
-import { sanitizeUrl } from "@shared/utils/urls";
+import { AttachmentPreset, PropertyType } from "@shared/types";
+import { errToString } from "@shared/utils/error";
+import { sanitizeImageSrc, sanitizeUrl } from "@shared/utils/urls";
 import { Inner } from "~/components/Button";
 import { InputSelect } from "~/components/InputSelect";
 import Switch from "~/components/Switch";
 import useStores from "~/hooks/useStores";
+import { uploadFile } from "~/utils/files";
 
 const EMPTY_VALUE = "";
 
@@ -23,13 +26,21 @@ type Props = {
   onChange: (value: PropertyValue | null) => void;
   /** Whether the value cannot be edited. */
   readOnly?: boolean;
+  /** The document the value belongs to, associating uploaded files with it. */
+  documentId?: string;
 };
 
 /**
  * Renders a typed editor for a single document property value, switching on
  * the property type from the collection's data schema.
  */
-function PropertyValueEditor({ property, value, onChange, readOnly }: Props) {
+function PropertyValueEditor({
+  property,
+  value,
+  onChange,
+  readOnly,
+  documentId,
+}: Props) {
   const { t } = useTranslation();
   const { users } = useStores();
 
@@ -160,6 +171,17 @@ function PropertyValueEditor({ property, value, onChange, readOnly }: Props) {
       );
     }
 
+    case PropertyType.Image:
+      return (
+        <ImageValueEditor
+          property={property}
+          value={value}
+          onChange={onChange}
+          readOnly={readOnly}
+          documentId={documentId}
+        />
+      );
+
     case PropertyType.Select: {
       const options = property.options ?? [];
       if (readOnly) {
@@ -277,6 +299,91 @@ function PropertyValueEditor({ property, value, onChange, readOnly }: Props) {
     default:
       return null;
   }
+}
+
+/**
+ * Edits an image property value: an empty value offers a file picker whose
+ * upload is stored as an attachment, a set value shows a thumbnail that can
+ * be replaced or removed.
+ */
+function ImageValueEditor({
+  property,
+  value,
+  onChange,
+  readOnly,
+  documentId,
+}: Props) {
+  const { t } = useTranslation();
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = React.useState(false);
+  const src = typeof value === "string" ? sanitizeImageSrc(value) : undefined;
+
+  const handleFileChange = async (ev: React.ChangeEvent<HTMLInputElement>) => {
+    const file = ev.target.files?.[0];
+    // reset so picking the same file again still fires a change event
+    ev.target.value = "";
+    if (!file) {
+      return;
+    }
+    setIsUploading(true);
+    try {
+      const attachment = await uploadFile(file, {
+        preset: AttachmentPreset.DocumentAttachment,
+        documentId,
+      });
+      onChange(attachment.url);
+    } catch (error) {
+      toast.error(errToString(error));
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  if (readOnly) {
+    return src ? (
+      <Thumbnail src={src} alt={property.name} />
+    ) : (
+      <Placeholder>–</Placeholder>
+    );
+  }
+
+  return (
+    <ChipList>
+      <HiddenFileInput
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+      />
+      {src ? (
+        <>
+          <ThumbnailButton
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={isUploading}
+            aria-label={t("Replace image")}
+          >
+            <Thumbnail src={src} alt={property.name} />
+          </ThumbnailButton>
+          <ChipRemove
+            type="button"
+            onClick={() => onChange(null)}
+            aria-label={t("Remove")}
+          >
+            ×
+          </ChipRemove>
+        </>
+      ) : (
+        <AddImageButton
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={isUploading}
+        >
+          {isUploading ? `${t("Uploading")}…` : t("Add image")}
+        </AddImageButton>
+      )}
+    </ChipList>
+  );
 }
 
 const RelationValueEditor = observer(function RelationValueEditor_({
@@ -458,6 +565,43 @@ const ChipList = styled.div`
   flex-wrap: wrap;
   gap: 4px;
   padding: 2px 6px;
+`;
+
+const Thumbnail = styled.img`
+  display: block;
+  height: 24px;
+  max-width: 120px;
+  border-radius: 3px;
+  object-fit: cover;
+`;
+
+const ThumbnailButton = styled.button`
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: var(--pointer);
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+`;
+
+const AddImageButton = styled.button`
+  border: 0;
+  background: none;
+  color: ${s("placeholder")};
+  font-size: 14px;
+  padding: 2px 0;
+  cursor: var(--pointer);
+
+  &:hover:not(:disabled) {
+    color: ${s("textSecondary")};
+  }
+`;
+
+const HiddenFileInput = styled.input`
+  display: none;
 `;
 
 const Chip = styled.span<{ $color?: string }>`

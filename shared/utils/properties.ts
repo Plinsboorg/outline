@@ -206,7 +206,8 @@ export function coercePropertyValue(
       return value;
     }
 
-    case PropertyType.Url: {
+    case PropertyType.Url:
+    case PropertyType.Image: {
       if (typeof value !== "string" || value.trim() === "") {
         return undefined;
       }

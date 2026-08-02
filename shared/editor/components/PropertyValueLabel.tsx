@@ -6,7 +6,7 @@ import { PropertyChip } from "../../components/PropertyChip";
 import { s } from "../../styles";
 import type { Property, PropertyValue } from "../../types";
 import { PropertyType } from "../../types";
-import { sanitizeUrl } from "../../utils/urls";
+import { sanitizeImageSrc, sanitizeUrl } from "../../utils/urls";
 import useStores from "../../hooks/useStores";
 
 type Props = {
@@ -64,6 +64,11 @@ export const PropertyValueLabel = observer(function PropertyValueLabel_({
           {value}
         </a>
       ) : null;
+
+    case PropertyType.Image: {
+      const src = typeof value === "string" ? sanitizeImageSrc(value) : "";
+      return src ? <Thumbnail src={src} alt={property.name} /> : null;
+    }
 
     case PropertyType.Person: {
       const user = typeof value === "string" ? users.get(value) : undefined;
@@ -142,6 +147,15 @@ const DocumentChip = styled(Link)`
 
 const Chip = styled(PropertyChip)`
   margin-right: 4px;
+`;
+
+const Thumbnail = styled.img`
+  display: inline-block;
+  height: 20px;
+  max-width: 100px;
+  border-radius: 3px;
+  object-fit: cover;
+  vertical-align: middle;
 `;
 
 export default PropertyValueLabel;

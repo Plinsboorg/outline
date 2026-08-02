@@ -7,6 +7,8 @@ import breakpoint from "styled-components-breakpoint";
 import { s } from "@shared/styles";
 import PropertyValueLabel from "@shared/editor/components/PropertyValueLabel";
 import type { Property } from "@shared/types";
+import { PropertyType } from "@shared/types";
+import { sanitizeImageSrc } from "@shared/utils/urls";
 import type Document from "~/models/Document";
 import NudeButton from "~/components/NudeButton";
 import DatabaseRowMenu from "./DatabaseRowMenu";
@@ -87,8 +89,21 @@ const GalleryCard = observer(function GalleryCard_({
   onTitleDone: () => void;
   onDelete?: (document: Document) => void;
 }) {
+  // the first visible image property doubles as the card's cover image
+  const coverProperty = properties.find(
+    (item) => item.type === PropertyType.Image
+  );
+  const coverValue = coverProperty
+    ? document.propertyValue(coverProperty.id)
+    : undefined;
+  const coverSrc =
+    typeof coverValue === "string" ? sanitizeImageSrc(coverValue) : undefined;
+
   return (
     <Card>
+      {coverSrc && (
+        <CardCover src={coverSrc} alt={coverProperty?.name} draggable={false} />
+      )}
       {onDelete && (
         <CardMenu>
           <DatabaseRowMenu document={document} onDelete={onDelete} />
@@ -100,6 +115,9 @@ const GalleryCard = observer(function GalleryCard_({
         <CardTitle to={document.path}>{document.titleWithDefault}</CardTitle>
       )}
       {properties.map((property) => {
+        if (property.id === coverProperty?.id) {
+          return null;
+        }
         const value = document.propertyValue(property.id);
         if (value === undefined || value === null) {
           return null;
@@ -136,6 +154,16 @@ const Card = styled.div`
   border: 1px solid ${s("divider")};
   border-radius: 8px;
   padding: 12px;
+`;
+
+/** The cover image bleeds to the card's edges, above its content. */
+const CardCover = styled.img`
+  display: block;
+  width: calc(100% + 24px);
+  height: 140px;
+  object-fit: cover;
+  margin: -12px -12px 8px;
+  border-radius: 7px 7px 0 0;
 `;
 
 /** The card's overflow menu, kept out of the way until the card is pointed at. */

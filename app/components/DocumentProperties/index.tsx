@@ -82,6 +82,7 @@ function DocumentProperties({ document }: Props) {
               value={document.propertyValue(property.id)}
               onChange={(value) => handleChange(property.id, value)}
               readOnly={!can.update}
+              documentId={document.id}
             />
           </Value>
         </Row>

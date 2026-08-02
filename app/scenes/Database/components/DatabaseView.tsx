@@ -456,8 +456,12 @@ function DatabaseView({ database }: Props) {
     return <PlaceholderList count={5} />;
   }
 
+  // rollups are computed at read time; image values are attachment urls with
+  // no meaningful order
   const sortableProperties = schema.filter(
-    (property) => property.type !== PropertyType.Rollup
+    (property) =>
+      property.type !== PropertyType.Rollup &&
+      property.type !== PropertyType.Image
   );
   const showGroupSelect =
     (viewType === DataViewType.Board || viewType === DataViewType.List) &&

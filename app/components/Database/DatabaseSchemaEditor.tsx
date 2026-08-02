@@ -36,6 +36,7 @@ const typeLabels: Record<PropertyType, string> = {
   [PropertyType.Date]: "Date",
   [PropertyType.Url]: "URL",
   [PropertyType.Person]: "Person",
+  [PropertyType.Image]: "Image",
   [PropertyType.Relation]: "Relation",
   [PropertyType.Rollup]: "Rollup",
 };

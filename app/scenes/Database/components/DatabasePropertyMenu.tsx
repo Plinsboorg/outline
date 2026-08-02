@@ -62,7 +62,9 @@ function DatabasePropertyMenu({
   const supportsOptions =
     property.type === PropertyType.Select ||
     property.type === PropertyType.MultiSelect;
-  const isSortable = property.type !== PropertyType.Rollup;
+  const isSortable =
+    property.type !== PropertyType.Rollup &&
+    property.type !== PropertyType.Image;
   const activeDirection =
     sort?.propertyId === property.id ? sort.direction : undefined;
 
