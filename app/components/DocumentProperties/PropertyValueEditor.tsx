@@ -547,8 +547,21 @@ const NudeInput = styled.input`
   color: ${s("text")};
   font-size: 14px;
   width: 100%;
+  min-width: 0;
   padding: 4px 6px;
   border-radius: 4px;
+
+  /* a number input's spin buttons give it a large intrinsic minimum width,
+     which blocks its table column from being resized narrow — render it as
+     a plain text field instead */
+  &[type="number"] {
+    appearance: textfield;
+  }
+  &[type="number"]::-webkit-outer-spin-button,
+  &[type="number"]::-webkit-inner-spin-button {
+    appearance: none;
+    margin: 0;
+  }
 
   &:hover:not(:disabled),
   &:focus:not(:disabled) {
