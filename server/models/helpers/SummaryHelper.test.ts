@@ -25,7 +25,7 @@ async function buildRows() {
   const build = async (properties: DocumentProperties) => {
     const document = await buildDocument({
       teamId: team.id,
-      collectionId: database.collectionId,
+      collectionId: database.document!.collectionId,
       databaseId: database.id,
     });
     document.properties = properties;
@@ -165,7 +165,7 @@ describe("SummaryHelper", () => {
     });
     const draft = await buildDocument({
       teamId: team.id,
-      collectionId: database.collectionId,
+      collectionId: database.document!.collectionId,
       databaseId: database.id,
       publishedAt: null,
     });

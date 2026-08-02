@@ -35,7 +35,7 @@ describe("RelationsProcessor", () => {
     const target = await buildDocument({ teamId: team.id });
     const document = await buildDocument({
       teamId: team.id,
-      collectionId: database.collectionId,
+      collectionId: database.document!.collectionId,
       databaseId: database.id,
       properties: { [propertyId]: [target.id] },
     });
@@ -44,7 +44,7 @@ describe("RelationsProcessor", () => {
     await processor.perform({
       name: "documents.update",
       documentId: document.id,
-      collectionId: database.collectionId,
+      collectionId: document.collectionId!,
       teamId: team.id,
       actorId: document.createdById,
       createdAt: document.updatedAt.toISOString(),
@@ -67,7 +67,7 @@ describe("RelationsProcessor", () => {
     const target = await buildDocument({ teamId: team.id });
     const document = await buildDocument({
       teamId: team.id,
-      collectionId: database.collectionId,
+      collectionId: database.document!.collectionId,
       databaseId: database.id,
       properties: { [propertyId]: [target.id] },
     });
@@ -76,7 +76,7 @@ describe("RelationsProcessor", () => {
     const event = {
       name: "documents.update" as const,
       documentId: document.id,
-      collectionId: database.collectionId,
+      collectionId: document.collectionId!,
       teamId: team.id,
       actorId: document.createdById,
       createdAt: document.updatedAt.toISOString(),
@@ -104,7 +104,7 @@ describe("RelationsProcessor", () => {
     const target = await buildDocument({ teamId: team.id });
     const document = await buildDocument({
       teamId: team.id,
-      collectionId: database.collectionId,
+      collectionId: database.document!.collectionId,
       databaseId: database.id,
       properties: { [propertyId]: [target.id] },
     });
@@ -113,7 +113,7 @@ describe("RelationsProcessor", () => {
     const event = {
       name: "documents.update" as const,
       documentId: document.id,
-      collectionId: database.collectionId,
+      collectionId: document.collectionId!,
       teamId: team.id,
       actorId: document.createdById,
       createdAt: document.updatedAt.toISOString(),

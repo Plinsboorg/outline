@@ -116,36 +116,32 @@ export const DatabasesListSchema = BaseSchema.extend({
 export type DatabasesListReq = z.infer<typeof DatabasesListSchema>;
 
 export const DatabasesCreateSchema = BaseSchema.extend({
-  body: z.object({
-    /** The collection the database belongs to */
-    collectionId: zodIdType(),
-    name: z.string().optional(),
-    icon: zodIconType().optional(),
-    color: z
-      .string()
-      .regex(ValidateColor.regex, { error: ValidateColor.message })
-      .nullish(),
-    /** The property definitions the database starts with */
-    dataSchema: z.array(PropertySchema).optional(),
-  }),
+  body: z
+    .object({
+      /** The collection to create the database in */
+      collectionId: zodIdType().optional(),
+      /** The document to nest the database under */
+      parentDocumentId: zodIdType().optional(),
+      name: z.string().optional(),
+      icon: zodIconType().optional(),
+      color: z
+        .string()
+        .regex(ValidateColor.regex, { error: ValidateColor.message })
+        .nullish(),
+      /** The property definitions the database starts with */
+      dataSchema: z.array(PropertySchema).optional(),
+    })
+    .refine((body) => !!body.collectionId || !!body.parentDocumentId, {
+      error: "one of collectionId or parentDocumentId is required",
+    }),
 });
 
 export type DatabasesCreateReq = z.infer<typeof DatabasesCreateSchema>;
 
 export const DatabasesUpdateSchema = BaseSchema.extend({
   body: BaseIdSchema.extend({
-    name: z.string().optional(),
-    icon: zodIconType().nullish(),
-    color: z
-      .string()
-      .regex(ValidateColor.regex, { error: ValidateColor.message })
-      .nullish(),
-    /** Whether the database's page ignores the usual reading width */
-    fullWidth: z.boolean().optional(),
     /** A custom display name for the title column; null restores "Title" */
     titleName: z.string().max(PropertyValidation.maxNameLength).nullish(),
-    /** Moves the database, and all of its rows, to another collection */
-    collectionId: zodIdType().optional(),
     /** The typed property definitions describing the database's columns */
     dataSchema: z.array(PropertySchema).optional(),
     /** Saved views over the database's rows */
@@ -154,24 +150,6 @@ export const DatabasesUpdateSchema = BaseSchema.extend({
 });
 
 export type DatabasesUpdateReq = z.infer<typeof DatabasesUpdateSchema>;
-
-export const DatabasesDeleteSchema = BaseSchema.extend({
-  body: BaseIdSchema,
-});
-
-export const DatabasesArchiveSchema = BaseSchema.extend({
-  body: BaseIdSchema,
-});
-
-export type DatabasesArchiveReq = z.infer<typeof DatabasesArchiveSchema>;
-
-export const DatabasesRestoreSchema = BaseSchema.extend({
-  body: BaseIdSchema,
-});
-
-export type DatabasesRestoreReq = z.infer<typeof DatabasesRestoreSchema>;
-
-export type DatabasesDeleteReq = z.infer<typeof DatabasesDeleteSchema>;
 
 export const DatabasesMoveRowSchema = BaseSchema.extend({
   body: BaseIdSchema.extend({

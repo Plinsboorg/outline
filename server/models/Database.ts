@@ -13,8 +13,6 @@ import {
   Default,
   ForeignKey,
   HasMany,
-  IsDate,
-  IsIn,
   Length,
   Table,
 } from "sequelize-typescript";
@@ -28,57 +26,25 @@ import {
   validateDataSchema,
   validateDataViews,
 } from "@shared/utils/properties";
-import { DatabaseValidation, PropertyValidation } from "@shared/validations";
-import Collection from "./Collection";
+import { PropertyValidation } from "@shared/validations";
 import Document from "./Document";
 import Team from "./Team";
 import User from "./User";
 import ParanoidModel from "./base/ParanoidModel";
 
 /**
- * A database is a set of documents that share a typed property schema, scoped
- * to a collection. A collection may hold any number of databases, and a
- * database can be moved between collections — its rows move with it.
+ * A database is a set of documents that share a typed property schema. It is
+ * anchored to a document with the same id — the anchor document carries the
+ * database's identity (title, icon, location, sharing, archived state), while
+ * this model carries the schema machinery. Rows are documents referencing the
+ * database through their databaseId, and follow the anchor document wherever
+ * it goes.
  */
 @Table({ tableName: "databases", modelName: "database" })
 class Database extends ParanoidModel<
   InferAttributes<Database>,
   Partial<InferCreationAttributes<Database>>
 > {
-  /** The name of the database. */
-  @Length({
-    max: DatabaseValidation.maxNameLength,
-    msg: `name must be ${DatabaseValidation.maxNameLength} characters or less`,
-  })
-  @Column(DataType.STRING)
-  name: string;
-
-  /** An icon (or emoji) to display alongside the database name. */
-  @Length({ max: 50, msg: "icon must be 50 characters or less" })
-  @Column(DataType.STRING)
-  icon: string | null;
-
-  /** The color of the database icon. */
-  @IsIn([
-    [
-      "#4E5C6E",
-      "#0366d6",
-      "#EDB90D",
-      "#FF825C",
-      "#FF5C80",
-      "#9E5CF7",
-      "#3ad984",
-      null,
-    ],
-  ])
-  @Column(DataType.STRING)
-  color: string | null;
-
-  /** Whether the database's page ignores the usual reading width. */
-  @Default(false)
-  @Column(DataType.BOOLEAN)
-  fullWidth: boolean;
-
   /** A custom display name for the title column; null means "Title". */
   @AllowNull
   @Length({
@@ -87,20 +53,6 @@ class Database extends ParanoidModel<
   })
   @Column(DataType.STRING)
   titleName: string | null;
-
-  /** When the database was archived, hiding it and its rows. */
-  @AllowNull
-  @IsDate
-  @Column(DataType.DATE)
-  archivedAt?: Date | null;
-
-  @BelongsTo(() => User, "archivedById")
-  archivedBy?: User | null;
-
-  @AllowNull
-  @ForeignKey(() => User)
-  @Column(DataType.UUID)
-  archivedById?: string | null;
 
   /** The typed property definitions that describe this database's columns. */
   @Default([])
@@ -132,12 +84,13 @@ class Database extends ParanoidModel<
 
   // associations
 
-  @BelongsTo(() => Collection, "collectionId")
-  collection: Collection;
-
-  @ForeignKey(() => Collection)
-  @Column(DataType.UUID)
-  collectionId: string;
+  /**
+   * The anchor document sharing this database's id. Not a sequelize
+   * association — the shared primary key confuses the ORM's eager loading, so
+   * routes load the document themselves (through the user scope, so policies
+   * can see collection memberships) and assign it here before authorizing.
+   */
+  document?: Document | null;
 
   @BelongsTo(() => Team, "teamId")
   team: Team;

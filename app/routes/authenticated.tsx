@@ -30,7 +30,6 @@ import env from "~/env";
 const SettingsRoutes = lazy(() => import("./settings"));
 const Archive = lazy(() => import("~/scenes/Archive"));
 const Collection = lazy(() => import("~/scenes/Collection"));
-const DatabaseScene = lazy(() => import("~/scenes/Database"));
 const Document = lazy(() => import("~/scenes/Document"));
 const Drafts = lazy(() => import("~/scenes/Drafts"));
 const Home = lazy(() => import("~/scenes/Home"));
@@ -105,7 +104,8 @@ function AuthenticatedRoutes() {
                 path={`/collection/${collectionSlug}/:tab?`}
                 component={Collection}
               />
-              <Route exact path="/database/:id" component={DatabaseScene} />
+              {/* databases are documents now; keep old links working */}
+              <Redirect exact from="/database/:id" to="/doc/:id" />
               <Route exact path="/doc/new" component={DocumentNew} />
               <Route
                 exact

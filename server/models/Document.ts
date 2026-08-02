@@ -1218,17 +1218,22 @@ class Document extends ArchivableModel<
     // than issuing one query per level of nesting (N+1). Rows are ordered by
     // depth to ensure breadth-first result ordering. UNION ALL is safe as the
     // tree is acyclic, so each descendant id is reached exactly once.
+    // A document is a child through either of two edges: nesting under a
+    // parent document, or being a row of a database anchored to the document
+    // with the same id — rows follow their database everywhere children do.
     const rows = await this.sequelize!.query<{ id: string }>(
       `
       WITH RECURSIVE children AS (
         SELECT documents.id, 1 AS depth
         FROM documents
-        WHERE documents."parentDocumentId" = :parentDocumentId
+        WHERE (documents."parentDocumentId" = :parentDocumentId
+          OR documents."databaseId" = :parentDocumentId)
           ${anchorFilter}
         UNION ALL
         SELECT documents.id, children.depth + 1
         FROM documents
         INNER JOIN children ON documents."parentDocumentId" = children.id
+          OR documents."databaseId" = children.id
         ${recursiveFilter}
       )
       SELECT id FROM children ORDER BY depth
@@ -1580,7 +1585,9 @@ class Document extends ArchivableModel<
         this.constructor as typeof Document
       ).findAll({
         where: {
-          parentDocumentId,
+          // database rows are children through their databaseId, and come
+          // back from the archive together with their database
+          [Op.or]: [{ parentDocumentId }, { databaseId: parentDocumentId }],
         },
         transaction,
       });
@@ -1613,7 +1620,9 @@ class Document extends ArchivableModel<
         this.constructor as typeof Document
       ).findAll({
         where: {
-          parentDocumentId,
+          // database rows are children through their databaseId, and are
+          // archived together with their database
+          [Op.or]: [{ parentDocumentId }, { databaseId: parentDocumentId }],
         },
         transaction,
       });

@@ -241,10 +241,11 @@ function DatabaseView({ database }: Props) {
       }
       isCreatingRef.current = true;
       try {
+        // the server places the row in the anchor document's collection
         const document = await documents.create(
           {
             title: "",
-            collectionId: database.collectionId,
+            collectionId: database.collectionId ?? undefined,
             databaseId: database.id,
           },
           { publish: true }

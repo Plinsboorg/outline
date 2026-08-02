@@ -21,7 +21,7 @@ it("presents document properties", async () => {
   const document = await buildDocument({
     teamId: team.id,
     userId: user.id,
-    collectionId: database.collectionId,
+    collectionId: database.document!.collectionId,
     databaseId: database.id,
   });
   document.setProperty(propertyId, "In progress");

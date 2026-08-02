@@ -860,14 +860,18 @@ class Collection extends ParanoidModel<
   deleteDocument = async (document: Document, options?: FindOptions) => {
     await this.removeDocumentInStructure(document, options);
 
-    // Helper to destroy all child documents for a document
+    // Helper to destroy all child documents for a document. Database rows are
+    // children through their databaseId and go to trash with their database.
     const loopChildren = async (
       documentId: string,
       opts?: FindOptions<Document>
     ) => {
       const childDocuments = await Document.findAll({
         where: {
-          parentDocumentId: documentId,
+          [Op.or]: [
+            { parentDocumentId: documentId },
+            { databaseId: documentId },
+          ],
         },
       });
 

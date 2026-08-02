@@ -35,12 +35,13 @@ import {
   EmbedIcon,
   OpenIcon,
   SplitIcon,
+  DatabaseIcon,
 } from "outline-icons";
 import { toast } from "sonner";
 import { errToString } from "@shared/utils/error";
 import Icon from "@shared/components/Icon";
 import type { NavigationNode } from "@shared/types";
-import { ExportContentType } from "@shared/types";
+import { ExportContentType, TeamPreference } from "@shared/types";
 import { isMobile } from "@shared/utils/browser";
 import { getEventFiles } from "@shared/utils/files";
 import { Week } from "@shared/utils/time";
@@ -300,6 +301,33 @@ export const createNestedDocument = createInternalLinkAction({
   },
 });
 
+export const createNestedDatabase = createAction({
+  name: ({ t }) => t("Nested database"),
+  analyticsName: "New database",
+  section: ActiveDocumentSection,
+  icon: <DatabaseIcon />,
+  keywords: "create nested database table",
+  visible: ({ currentTeamId, activeDocumentId, stores }) =>
+    !!currentTeamId &&
+    !!activeDocumentId &&
+    !!stores.auth.team?.getPreference(TeamPreference.DocumentDatabases) &&
+    stores.policies.abilities(activeDocumentId).createChildDocument,
+  perform: async ({ t, activeDocumentId, stores }) => {
+    if (!activeDocumentId) {
+      return;
+    }
+    try {
+      const database = await stores.databases.create({
+        parentDocumentId: activeDocumentId,
+        name: t("Untitled database"),
+      });
+      history.push(database.path);
+    } catch (error) {
+      toast.error(errToString(error));
+    }
+  },
+});
+
 const createDocumentBefore = createInternalLinkAction({
   name: ({ t }) => t("Before"),
   analyticsName: "New document before",
@@ -411,7 +439,12 @@ export const createNewDocument = createActionWithChildren({
     }
     return !isAlphabeticallySorted(stores, activeDocumentId);
   },
-  children: [createDocumentBefore, createDocumentAfter, createNestedDocument],
+  children: [
+    createDocumentBefore,
+    createDocumentAfter,
+    createNestedDocument,
+    createNestedDatabase,
+  ],
 });
 
 export const createNewDocumentInAlphabeticalCollection =

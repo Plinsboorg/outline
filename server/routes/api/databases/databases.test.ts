@@ -8,6 +8,7 @@ import {
 } from "@shared/types";
 import { Database, Document, UserMembership } from "@server/models";
 import {
+  buildAdmin,
   buildCollection,
   buildDatabase,
   buildDocument,
@@ -46,21 +47,62 @@ describe("#databases.create", () => {
     expect(body.data.dataSchema).toEqual([]);
   });
 
+  it("should create an anchor document sharing the database's id", async () => {
+    const { user, collection } = await buildEnabledTeam();
+
+    const res = await server.post("/api/databases.create", user, {
+      body: { collectionId: collection.id, name: "Roadmap" },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+
+    const anchor = await Document.findByPk(body.data.id, {
+      rejectOnEmpty: true,
+    });
+    expect(anchor.title).toEqual("Roadmap");
+    expect(anchor.collectionId).toEqual(collection.id);
+    expect(anchor.publishedAt).toBeTruthy();
+  });
+
+  it("should create a database nested under another document", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const parent = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+
+    const res = await server.post("/api/databases.create", user, {
+      body: { parentDocumentId: parent.id, name: "Sub-database" },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+
+    const anchor = await Document.findByPk(body.data.id, {
+      rejectOnEmpty: true,
+    });
+    expect(anchor.parentDocumentId).toEqual(parent.id);
+    expect(anchor.collectionId).toEqual(collection.id);
+  });
+
   it("should allow several databases in one collection", async () => {
     const { user, collection } = await buildEnabledTeam();
 
-    await server.post("/api/databases.create", user, {
+    const first = await server.post("/api/databases.create", user, {
       body: { collectionId: collection.id, name: "First" },
     });
     const res = await server.post("/api/databases.create", user, {
       body: { collectionId: collection.id, name: "Second" },
     });
+    expect(first.status).toEqual(200);
     expect(res.status).toEqual(200);
 
-    const count = await Database.count({
-      where: { collectionId: collection.id },
-    });
-    expect(count).toEqual(2);
+    const list = await (
+      await server.post("/api/databases.list", user, {
+        body: { collectionId: collection.id },
+      })
+    ).json();
+    expect(list.data).toHaveLength(2);
   });
 
   it("should fail when the feature is disabled", async () => {
@@ -487,7 +529,7 @@ describe("#databases.update", () => {
     expect(body.data.views).toHaveLength(2);
   });
 
-  it("should move the database and its rows to another collection", async () => {
+  it("should move the rows when the anchor document moves collection", async () => {
     const { team, user, collection } = await buildEnabledTeam();
     const destination = await buildCollection({
       teamId: team.id,
@@ -505,7 +547,8 @@ describe("#databases.update", () => {
       databaseId: database.id,
     });
 
-    const res = await server.post("/api/databases.update", user, {
+    // a database is moved by moving its anchor document, like any document
+    const res = await server.post("/api/documents.move", user, {
       body: { id: database.id, collectionId: destination.id },
     });
     expect(res.status).toEqual(200);
@@ -563,7 +606,7 @@ describe("#databases.update", () => {
     const viewer = await buildViewer({ teamId: team.id });
 
     const res = await server.post("/api/databases.update", viewer, {
-      body: { id: database.id, name: "Nope" },
+      body: { id: database.id, titleName: "Nope" },
     });
     expect(res.status).toEqual(403);
   });
@@ -745,8 +788,8 @@ describe("#databases.move_row", () => {
   });
 });
 
-describe("#databases.delete", () => {
-  it("should delete the database and keep its rows as documents", async () => {
+describe("database lifecycle through the anchor document", () => {
+  it("should trash the rows with the database and keep the facet", async () => {
     const { team, user, collection } = await buildEnabledTeam();
     const database = await buildDatabase({
       teamId: team.id,
@@ -760,19 +803,59 @@ describe("#databases.delete", () => {
       databaseId: database.id,
     });
 
-    const res = await server.post("/api/databases.delete", user, {
+    const res = await server.post("/api/documents.delete", user, {
       body: { id: database.id },
+    });
+    expect(res.status).toEqual(200);
+
+    // trash is reversible, so the facet stays until the delete is permanent
+    expect(await Database.findByPk(database.id)).toBeTruthy();
+
+    const reloaded = await Document.findByPk(row.id, { paranoid: false });
+    expect(reloaded?.deletedAt).toBeTruthy();
+    expect(reloaded?.databaseId).toEqual(database.id);
+  });
+
+  it("should destroy the facet and detach the rows on permanent delete", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const propertyId = randomUUID();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      dataSchema: [{ id: propertyId, name: "Stage", type: PropertyType.Text }],
+    });
+    const row = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+    });
+    await row.update({ properties: { [propertyId]: "shipped" } });
+
+    // permanent deletion is an admin operation
+    const admin = await buildAdmin({ teamId: team.id });
+    await server.post("/api/documents.delete", user, {
+      body: { id: database.id },
+    });
+    const res = await server.post("/api/documents.delete", admin, {
+      body: { id: database.id, permanent: true },
     });
     expect(res.status).toEqual(200);
 
     expect(await Database.findByPk(database.id)).toBeNull();
 
-    const reloaded = await Document.findByPk(row.id, { rejectOnEmpty: true });
+    // the row survives as an ordinary document, keeping its values — they are
+    // keyed by property id and simply stop resolving
+    const reloaded = await Document.findByPk(row.id, {
+      paranoid: false,
+      rejectOnEmpty: true,
+    });
     expect(reloaded.databaseId).toBeNull();
-    expect(reloaded.deletedAt).toBeNull();
+    expect(reloaded.properties).toEqual({ [propertyId]: "shipped" });
   });
 
-  it("should remove mirror properties from other databases", async () => {
+  it("should remove mirror properties from other databases on permanent delete", async () => {
     const { team, user, collection } = await buildEnabledTeam();
     const target = await buildDatabase({
       teamId: team.id,
@@ -804,8 +887,12 @@ describe("#databases.delete", () => {
     });
     await target.save();
 
-    const res = await server.post("/api/databases.delete", user, {
+    const admin = await buildAdmin({ teamId: team.id });
+    await server.post("/api/documents.delete", user, {
       body: { id: source.id },
+    });
+    const res = await server.post("/api/documents.delete", admin, {
+      body: { id: source.id, permanent: true },
     });
     expect(res.status).toEqual(200);
 
@@ -813,24 +900,7 @@ describe("#databases.delete", () => {
     expect(target.getProperty(inverseId)).toBeUndefined();
   });
 
-  it("should require write access", async () => {
-    const { team, user, collection } = await buildEnabledTeam();
-    const database = await buildDatabase({
-      teamId: team.id,
-      userId: user.id,
-      collectionId: collection.id,
-    });
-    const viewer = await buildViewer({ teamId: team.id });
-
-    const res = await server.post("/api/databases.delete", viewer, {
-      body: { id: database.id },
-    });
-    expect(res.status).toEqual(403);
-  });
-});
-
-describe("#databases.archive", () => {
-  it("should hide the database and its rows, then restore both", async () => {
+  it("should archive the rows with the database, then restore both", async () => {
     const { team, user, collection } = await buildEnabledTeam();
     const database = await buildDatabase({
       teamId: team.id,
@@ -844,7 +914,7 @@ describe("#databases.archive", () => {
       databaseId: database.id,
     });
 
-    const archived = await server.post("/api/databases.archive", user, {
+    const archived = await server.post("/api/documents.archive", user, {
       body: { id: database.id },
     });
     expect(archived.status).toEqual(200);
@@ -869,7 +939,7 @@ describe("#databases.archive", () => {
     expect(row.databaseId).toEqual(database.id);
     expect(row.archivedAt).toBeTruthy();
 
-    const restored = await server.post("/api/databases.restore", user, {
+    const restored = await server.post("/api/documents.restore", user, {
       body: { id: database.id },
     });
     expect(restored.status).toEqual(200);
@@ -892,7 +962,7 @@ describe("#databases.archive", () => {
       userId: user.id,
       collectionId: collection.id,
     });
-    await server.post("/api/databases.archive", user, {
+    await server.post("/api/documents.archive", user, {
       body: { id: database.id },
     });
 
@@ -904,79 +974,5 @@ describe("#databases.archive", () => {
     expect(res.status).toEqual(200);
     expect(body.data).toHaveLength(1);
     expect(body.data[0].id).toEqual(database.id);
-  });
-
-  it("should leave a separately archived row archived on restore", async () => {
-    const { team, user, collection } = await buildEnabledTeam();
-    const database = await buildDatabase({
-      teamId: team.id,
-      userId: user.id,
-      collectionId: collection.id,
-    });
-    const row = await buildDocument({
-      teamId: team.id,
-      userId: user.id,
-      collectionId: collection.id,
-      databaseId: database.id,
-      archivedAt: new Date("2020-01-01"),
-    });
-
-    await server.post("/api/databases.archive", user, {
-      body: { id: database.id },
-    });
-    await server.post("/api/databases.restore", user, {
-      body: { id: database.id },
-    });
-
-    // it was not the database that archived this row, so restoring must not
-    // bring it back
-    await row.reload({ paranoid: false });
-    expect(row.archivedAt).toBeTruthy();
-  });
-
-  it("should require write access to archive", async () => {
-    const { team, user, collection } = await buildEnabledTeam();
-    const viewer = await buildViewer({ teamId: team.id });
-    const database = await buildDatabase({
-      teamId: team.id,
-      userId: user.id,
-      collectionId: collection.id,
-    });
-
-    const res = await server.post("/api/databases.archive", viewer, {
-      body: { id: database.id },
-    });
-    expect(res.status).toEqual(403);
-  });
-});
-
-describe("#databases.delete", () => {
-  it("should keep the rows and their property values", async () => {
-    const { team, user, collection } = await buildEnabledTeam();
-    const propertyId = randomUUID();
-    const database = await buildDatabase({
-      teamId: team.id,
-      userId: user.id,
-      collectionId: collection.id,
-      dataSchema: [{ id: propertyId, name: "Stage", type: PropertyType.Text }],
-    });
-    const row = await buildDocument({
-      teamId: team.id,
-      userId: user.id,
-      collectionId: collection.id,
-      databaseId: database.id,
-    });
-    await row.update({ properties: { [propertyId]: "shipped" } });
-
-    const res = await server.post("/api/databases.delete", user, {
-      body: { id: database.id },
-    });
-    expect(res.status).toEqual(200);
-
-    await row.reload();
-    expect(row.databaseId).toBeNull();
-    // values are keyed by property id and simply stop resolving, so deleting
-    // the database does not destroy them
-    expect(row.properties).toEqual({ [propertyId]: "shipped" });
   });
 });

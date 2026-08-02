@@ -21,7 +21,7 @@ it("presents the schema and views", async () => {
 
   const presented = presentDatabase(database);
   expect(presented.name).toBe("Roadmap");
-  expect(presented.collectionId).toBe(database.collectionId);
+  expect(presented.collectionId).toBe(database.document!.collectionId);
   expect(presented.dataSchema).toEqual([
     { id: propertyId, name: "Status", type: PropertyType.Text },
   ]);

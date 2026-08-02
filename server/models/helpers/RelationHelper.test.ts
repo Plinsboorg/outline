@@ -157,12 +157,12 @@ describe("syncInverseValues", () => {
 
     const project = await buildDocument({
       teamId: team.id,
-      collectionId: projects.collectionId,
+      collectionId: projects.document!.collectionId,
       databaseId: projects.id,
     });
     const task = await buildDocument({
       teamId: team.id,
-      collectionId: tasks.collectionId,
+      collectionId: tasks.document!.collectionId,
       databaseId: tasks.id,
     });
 
@@ -180,12 +180,12 @@ describe("syncInverseValues", () => {
 
     const project = await buildDocument({
       teamId: team.id,
-      collectionId: projects.collectionId,
+      collectionId: projects.document!.collectionId,
       databaseId: projects.id,
     });
     const task = await buildDocument({
       teamId: team.id,
-      collectionId: tasks.collectionId,
+      collectionId: tasks.document!.collectionId,
       databaseId: tasks.id,
     });
 
@@ -212,12 +212,12 @@ describe("syncInverseValues", () => {
 
     const project = await buildDocument({
       teamId: team.id,
-      collectionId: projects.collectionId,
+      collectionId: projects.document!.collectionId,
       databaseId: projects.id,
     });
     const task = await buildDocument({
       teamId: team.id,
-      collectionId: tasks.collectionId,
+      collectionId: tasks.document!.collectionId,
       databaseId: tasks.id,
     });
 
@@ -248,12 +248,12 @@ describe("syncInverseValues", () => {
 
     const row = await buildDocument({
       teamId: team.id,
-      collectionId: source.collectionId,
+      collectionId: source.document!.collectionId,
       databaseId: source.id,
     });
     const other = await buildDocument({
       teamId: team.id,
-      collectionId: target.collectionId,
+      collectionId: target.document!.collectionId,
       databaseId: target.id,
     });
 
@@ -273,12 +273,12 @@ describe("clearInverseValues", () => {
 
     const project = await buildDocument({
       teamId: team.id,
-      collectionId: projects.collectionId,
+      collectionId: projects.document!.collectionId,
       databaseId: projects.id,
     });
     const task = await buildDocument({
       teamId: team.id,
-      collectionId: tasks.collectionId,
+      collectionId: tasks.document!.collectionId,
       databaseId: tasks.id,
     });
 

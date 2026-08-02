@@ -14,6 +14,7 @@ import { IconType, TOCPosition, TeamPreference } from "@shared/types";
 import { determineIconType } from "@shared/utils/icon";
 import type Document from "~/models/Document";
 import type Revision from "~/models/Revision";
+import DocumentDatabase from "~/components/Database/DocumentDatabase";
 import DocumentMove from "~/components/DocumentExplorer/DocumentMove";
 import DocumentPublish from "~/scenes/DocumentPublish";
 import ErrorBoundary from "~/components/ErrorBoundary";
@@ -409,6 +410,7 @@ function DocumentScene({
                       canComment={abilities.comment}
                       autoFocus={document.createdAt === document.updatedAt}
                     >
+                      <DocumentDatabase document={document} />
                       <ReferencesWrapper>
                         <References document={document} />
                       </ReferencesWrapper>

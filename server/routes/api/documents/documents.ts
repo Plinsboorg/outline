@@ -194,14 +194,11 @@ router.post(
     if (databaseId) {
       database = await Database.findByPk(databaseId);
       if (database) {
-        // load the collection through the user scope so that membership of a
-        // private collection is visible to the policy check
-        const collection = await Collection.findByPk(database.collectionId, {
+        // load the anchor document through the user scope so that membership
+        // of a private collection is visible to the policy check
+        database.document = await Document.findByPk(database.id, {
           userId: user.id,
         });
-        if (collection) {
-          database.collection = collection;
-        }
       }
       authorize(user, "read", database);
 
@@ -1851,27 +1848,24 @@ router.post(
     const { transaction } = ctx.state;
     const { user } = ctx.state.auth;
 
-    // a row is created inside its database, and inherits that database's
-    // collection so it stays readable by exactly the same people
+    // a row is created inside its database, and inherits the anchor
+    // document's collection so it stays readable by exactly the same people
     let database: Database | null = null;
     if (databaseId) {
       database = await Database.findByPk(databaseId, { transaction });
       if (database) {
-        // load the collection through the user scope so that membership of a
-        // private collection is visible to the policy check
-        const databaseCollection = await Collection.findByPk(
-          database.collectionId,
-          { userId: user.id, transaction }
-        );
-        if (databaseCollection) {
-          database.collection = databaseCollection;
-        }
+        // load the anchor document through the user scope so that membership
+        // of a private collection is visible to the policy check
+        database.document = await Document.findByPk(database.id, {
+          userId: user.id,
+          transaction,
+        });
       }
       authorize(user, "createRow", database);
     }
 
     const { collection } = await authorizeDocumentCreate(ctx, {
-      collectionId: database?.collectionId ?? collectionId,
+      collectionId: database?.document?.collectionId ?? collectionId,
       parentDocumentId,
     });
 

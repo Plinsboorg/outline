@@ -326,7 +326,14 @@ export async function buildCollection(
 }
 
 export async function buildDatabase(
-  overrides: Partial<Database> & { userId?: string } = {}
+  overrides: Partial<Database> & {
+    userId?: string;
+    /** Attributes applied to the anchor document carrying the identity. */
+    collectionId?: string;
+    name?: string;
+    icon?: string;
+    archivedAt?: Date;
+  } = {}
 ) {
   if (!overrides.teamId) {
     const team = await buildTeam();
@@ -348,15 +355,27 @@ export async function buildDatabase(
     overrides.collectionId = collection.id;
   }
 
-  const { userId, ...rest } = overrides;
+  const { userId, collectionId, name, icon, archivedAt, ...rest } = overrides;
 
-  return Database.create({
-    name: faker.lorem.words(2),
+  // the anchor document shares the database's id and carries its identity
+  const document = await buildDocument({
+    teamId: overrides.teamId,
+    userId,
+    collectionId,
+    title: name ?? faker.lorem.words(2),
+    icon,
+    archivedAt,
+  });
+
+  const database = await Database.create({
+    id: document.id,
     dataSchema: [],
     views: [],
     createdById: userId,
     ...rest,
   });
+  database.document = document;
+  return database;
 }
 
 export async function buildGroup(

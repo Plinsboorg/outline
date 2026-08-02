@@ -4,12 +4,14 @@ import type { Property } from "@shared/types";
 import { PropertyType, TeamPreference } from "@shared/types";
 import { errToString } from "@shared/utils/error";
 import { validateDataViews } from "@shared/utils/properties";
-import { DatabaseValidation } from "@shared/validations";
 import { ValidationError } from "@server/errors";
 import auth from "@server/middlewares/authentication";
 import { transaction } from "@server/middlewares/transaction";
 import validate from "@server/middlewares/validate";
-import { Collection, Database, Document } from "@server/models";
+import documentCreator, {
+  authorizeDocumentCreate,
+} from "@server/commands/documentCreator";
+import { Database, Document } from "@server/models";
 import { RelationHelper } from "@server/models/helpers/RelationHelper";
 import { authorize } from "@server/policies";
 import { presentDatabase, presentPolicies } from "@server/presenters";
@@ -35,54 +37,36 @@ router.post(
     const { user } = ctx.state.auth;
     authorizeFeature(ctx);
 
-    if (collectionId) {
-      const collection = await Collection.findByPk(collectionId, {
-        userId: user.id,
-      });
-      authorize(user, "readDocument", collection);
-    }
-
-    // without a collection filter, only return databases in collections the
-    // user can read — the plain association include is not user-scoped
-    const collectionIds = collectionId
-      ? [collectionId]
-      : await user.collectionIds();
-
     const databases = await Database.findAll({
-      where: {
-        teamId: user.teamId,
-        collectionId: collectionIds,
-        archivedAt: archived ? { [Op.ne]: null } : { [Op.is]: null },
-      },
+      where: { teamId: user.teamId },
       order: [["createdAt", "ASC"]],
     });
 
-    // attach collections through the user scope so the presented policies
-    // can see the user's membership of private collections
-    const collections = await Collection.scope([
-      "defaultScope",
-      { method: ["withMembership", user.id] },
-    ]).findAll({
+    // the anchor documents carry location and archived state, and loading
+    // them through the membership scope lets the presented policies see the
+    // user's access to documents in private collections. A requested
+    // collection is intersected with the readable ones rather than trusted.
+    const readableCollectionIds = await user.collectionIds();
+    const collectionIds = collectionId
+      ? readableCollectionIds.filter((id) => id === collectionId)
+      : readableCollectionIds;
+    const anchors = await Document.withMembershipScope(user.id).findAll({
       where: {
-        id: Array.from(
-          new Set(databases.map((database) => database.collectionId))
-        ),
-        teamId: user.teamId,
+        id: databases.map((database) => database.id),
+        collectionId: collectionIds,
+        archivedAt: archived ? { [Op.ne]: null } : { [Op.is]: null },
       },
     });
-    const collectionById = new Map(
-      collections.map((collection) => [collection.id, collection])
-    );
-    for (const database of databases) {
-      const collection = collectionById.get(database.collectionId);
-      if (collection) {
-        database.collection = collection;
-      }
-    }
+    const anchorById = new Map(anchors.map((anchor) => [anchor.id, anchor]));
+
+    const visible = databases.filter((database) => {
+      database.document = anchorById.get(database.id);
+      return !!database.document;
+    });
 
     ctx.body = {
-      data: databases.map(presentDatabase),
-      policies: presentPolicies(user, databases),
+      data: visible.map(presentDatabase),
+      policies: presentPolicies(user, visible),
     };
   }
 );
@@ -98,9 +82,8 @@ router.post(
 
     const database = await Database.findByPk(id);
     if (database) {
-      database.collection = await Collection.findByPk(database.collectionId, {
+      database.document = await Document.findByPk(database.id, {
         userId: user.id,
-        rejectOnEmpty: true,
       });
     }
     authorize(user, "read", database);
@@ -118,36 +101,34 @@ router.post(
   validate(T.DatabasesCreateSchema),
   transaction(),
   async (ctx: APIContext<T.DatabasesCreateReq>) => {
-    const { collectionId, name, icon, color, dataSchema } = ctx.input.body;
+    const { collectionId, parentDocumentId, name, icon, color, dataSchema } =
+      ctx.input.body;
     const { user } = ctx.state.auth;
     const { transaction } = ctx.state;
     authorizeFeature(ctx);
 
-    const collection = await Collection.findByPk(collectionId, {
-      userId: user.id,
-      transaction,
+    // a database is created wherever a document can be: at a collection root
+    // or nested under another document, inheriting the parent's collection
+    const { collection } = await authorizeDocumentCreate(ctx, {
+      collectionId,
+      parentDocumentId,
     });
-    authorize(user, "updateDocument", collection);
 
-    const count = await Database.count({
-      where: { collectionId },
-      transaction,
+    const document = await documentCreator(ctx, {
+      title: name || "Untitled database",
+      icon: icon ?? undefined,
+      color: color ?? undefined,
+      collectionId: collection?.id,
+      parentDocumentId,
+      publish: true,
     });
-    if (count >= DatabaseValidation.maxPerCollection) {
-      throw ValidationError(
-        `A collection may contain at most ${DatabaseValidation.maxPerCollection} databases`
-      );
-    }
 
     const schema: Property[] = dataSchema ?? [];
     const database = await Database.create(
       {
-        name: name || "Untitled database",
-        icon: icon ?? null,
-        color: color ?? null,
+        id: document.id,
         dataSchema: schema,
         views: [Database.buildDefaultView(schema)],
-        collectionId,
         teamId: user.teamId,
         createdById: user.id,
       },
@@ -156,9 +137,7 @@ router.post(
 
     await RelationHelper.syncInverseProperties(database, [], { transaction });
 
-    // the policies presented below need the collection, and it has to carry
-    // the user's membership for private collections
-    database.collection = collection;
+    database.document = document;
 
     ctx.body = {
       data: presentDatabase(database),
@@ -173,17 +152,7 @@ router.post(
   validate(T.DatabasesUpdateSchema),
   transaction(),
   async (ctx: APIContext<T.DatabasesUpdateReq>) => {
-    const {
-      id,
-      name,
-      icon,
-      color,
-      fullWidth,
-      titleName,
-      collectionId,
-      dataSchema,
-      views,
-    } = ctx.input.body;
+    const { id, titleName, dataSchema, views } = ctx.input.body;
     const { user } = ctx.state.auth;
     const { transaction } = ctx.state;
     authorizeFeature(ctx);
@@ -193,28 +162,15 @@ router.post(
       lock: transaction.LOCK.UPDATE,
     });
     if (database) {
-      database.collection = await Collection.findByPk(database.collectionId, {
+      database.document = await Document.findByPk(database.id, {
         userId: user.id,
         transaction,
-        rejectOnEmpty: true,
       });
     }
     authorize(user, "update", database);
 
     const previousSchema = database.dataSchema;
 
-    if (name !== undefined) {
-      database.name = name;
-    }
-    if (icon !== undefined) {
-      database.icon = icon ?? null;
-    }
-    if (color !== undefined) {
-      database.color = color ?? null;
-    }
-    if (fullWidth !== undefined) {
-      database.fullWidth = fullWidth;
-    }
     if (titleName !== undefined) {
       database.titleName = titleName?.trim() || null;
     }
@@ -223,26 +179,6 @@ router.post(
     }
     if (views !== undefined) {
       database.views = views;
-    }
-
-    // moving a database moves its rows with it, so that a row is always
-    // readable by whoever can read the collection the database now lives in
-    if (collectionId && collectionId !== database.collectionId) {
-      const destination = await Collection.findByPk(collectionId, {
-        userId: user.id,
-        transaction,
-      });
-      authorize(user, "updateDocument", destination);
-
-      database.collectionId = collectionId;
-      await Document.update(
-        { collectionId },
-        {
-          where: { databaseId: database.id, teamId: user.teamId },
-          transaction,
-          hooks: false,
-        }
-      );
     }
 
     // deleting a column replaces the whole schema, and the caller cannot know
@@ -312,10 +248,9 @@ router.post(
 
     const database = await Database.findByPk(id, { transaction });
     if (database) {
-      database.collection = await Collection.findByPk(database.collectionId, {
+      database.document = await Document.findByPk(database.id, {
         userId: user.id,
         transaction,
-        rejectOnEmpty: true,
       });
     }
     // the manual order is a property of the database, not of the row, so it is
@@ -340,176 +275,6 @@ router.post(
 
     ctx.body = {
       success: true,
-    };
-  }
-);
-
-router.post(
-  "databases.delete",
-  auth(),
-  validate(T.DatabasesDeleteSchema),
-  transaction(),
-  async (ctx: APIContext<T.DatabasesDeleteReq>) => {
-    const { id } = ctx.input.body;
-    const { user } = ctx.state.auth;
-    const { transaction } = ctx.state;
-    authorizeFeature(ctx);
-
-    const database = await Database.findByPk(id, {
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-    if (database) {
-      database.collection = await Collection.findByPk(database.collectionId, {
-        userId: user.id,
-        transaction,
-        rejectOnEmpty: true,
-      });
-    }
-    authorize(user, "delete", database);
-
-    // mirrors on other databases would otherwise point at a database that is
-    // no longer there, so drop the schema first and let the sync remove them
-    const previousSchema = database.dataSchema;
-    database.dataSchema = [];
-    await RelationHelper.syncInverseProperties(database, previousSchema, {
-      transaction,
-    });
-
-    // rows outlive the database as ordinary documents. They were kept out of
-    // the collection's document structure while the database owned them, so
-    // they are put back into it here or they would be unreachable.
-    const rows = await Document.findAll({
-      where: { databaseId: database.id, teamId: user.teamId },
-      transaction,
-    });
-    const collection = await Collection.findByPk(database.collectionId, {
-      includeDocumentStructure: true,
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-
-    for (const row of rows) {
-      // the property values are left in place: they are keyed by property id,
-      // so with the schema gone they simply resolve to nothing, and keeping
-      // them means deleting a database never destroys data that cannot be
-      // recovered. Archiving is the reversible option; this is not.
-      row.databaseId = null;
-      await row.save({ transaction, hooks: false, silent: true });
-
-      if (collection && row.publishedAt && !row.deletedAt && !row.archivedAt) {
-        await collection.addDocumentToStructure(row, undefined, {
-          transaction,
-          save: false,
-        });
-      }
-    }
-    if (collection) {
-      await collection.save({ transaction });
-    }
-
-    await database.destroy({ transaction });
-
-    ctx.body = { success: true };
-  }
-);
-
-router.post(
-  "databases.archive",
-  auth(),
-  validate(T.DatabasesArchiveSchema),
-  transaction(),
-  async (ctx: APIContext<T.DatabasesArchiveReq>) => {
-    const { id } = ctx.input.body;
-    const { user } = ctx.state.auth;
-    const { transaction } = ctx.state;
-    authorizeFeature(ctx);
-
-    const database = await Database.findByPk(id, {
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-      rejectOnEmpty: true,
-    });
-    database.collection = await Collection.findByPk(database.collectionId, {
-      userId: user.id,
-      transaction,
-      rejectOnEmpty: true,
-    });
-    authorize(user, "archive", database);
-
-    const archivedAt = new Date();
-    database.archivedAt = archivedAt;
-    database.archivedById = user.id;
-    await database.save({ transaction });
-
-    // rows keep their databaseId and their property values — archiving hides
-    // them, it does not unpick the database. Rows already archived on their
-    // own are left alone so restoring cannot un-archive them by accident.
-    await Document.update(
-      { lastModifiedById: user.id, archivedAt },
-      {
-        where: {
-          teamId: user.teamId,
-          databaseId: database.id,
-          archivedAt: { [Op.is]: null },
-        },
-        transaction,
-        hooks: false,
-      }
-    );
-
-    ctx.body = {
-      data: presentDatabase(database),
-      policies: presentPolicies(user, [database]),
-    };
-  }
-);
-
-router.post(
-  "databases.restore",
-  auth(),
-  validate(T.DatabasesRestoreSchema),
-  transaction(),
-  async (ctx: APIContext<T.DatabasesRestoreReq>) => {
-    const { id } = ctx.input.body;
-    const { user } = ctx.state.auth;
-    const { transaction } = ctx.state;
-    authorizeFeature(ctx);
-
-    const database = await Database.findByPk(id, {
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-      rejectOnEmpty: true,
-    });
-    database.collection = await Collection.findByPk(database.collectionId, {
-      userId: user.id,
-      transaction,
-      rejectOnEmpty: true,
-    });
-    authorize(user, "restore", database);
-
-    // only the rows this archive took down come back, matched on the exact
-    // timestamp it stamped them with
-    await Document.update(
-      { lastModifiedById: user.id, archivedAt: null },
-      {
-        where: {
-          teamId: user.teamId,
-          databaseId: database.id,
-          archivedAt: database.archivedAt,
-        },
-        transaction,
-        hooks: false,
-      }
-    );
-
-    database.archivedAt = null;
-    database.archivedById = null;
-    await database.save({ transaction });
-
-    ctx.body = {
-      data: presentDatabase(database),
-      policies: presentPolicies(user, [database]),
     };
   }
 );

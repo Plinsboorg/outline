@@ -4,32 +4,29 @@ import { allow, can } from "./cancan";
 import { and, isTeamModel, isTeamMutable } from "./utils";
 
 /**
- * Databases inherit their authorization from the collection they live in, in
- * the same way documents do — reading a database means being able to read
- * documents in its collection, and editing one means being able to update the
- * collection. Every ability additionally requires the feature to be enabled
- * for the team.
+ * Databases inherit their authorization from their anchor document — the
+ * document sharing the database's id. Reading a database means being able to
+ * read that document, and changing its schema, views or rows means being able
+ * to update it. Every ability additionally requires the feature to be enabled
+ * for the team. Routes must load the anchor document through the user scope
+ * and assign it to `database.document` before authorizing.
  */
 
 allow(User, "read", Database, (actor, database) =>
   and(
     isTeamModel(actor, database),
     !!actor.team?.getPreference(TeamPreference.DocumentDatabases),
-    can(actor, "readDocument", database?.collection)
+    can(actor, "read", database?.document)
   )
 );
 
-allow(
-  User,
-  ["update", "delete", "createRow", "archive", "restore"],
-  Database,
-  (actor, database) =>
-    and(
-      isTeamModel(actor, database),
-      isTeamMutable(actor),
-      !actor.isGuest,
-      !actor.isViewer,
-      !!actor.team?.getPreference(TeamPreference.DocumentDatabases),
-      can(actor, "updateDocument", database?.collection)
-    )
+allow(User, ["update", "createRow"], Database, (actor, database) =>
+  and(
+    isTeamModel(actor, database),
+    isTeamMutable(actor),
+    !actor.isGuest,
+    !actor.isViewer,
+    !!actor.team?.getPreference(TeamPreference.DocumentDatabases),
+    can(actor, "update", database?.document)
+  )
 );

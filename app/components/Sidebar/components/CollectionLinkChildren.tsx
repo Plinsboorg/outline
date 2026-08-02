@@ -16,7 +16,6 @@ import { useDropToChangeCollection } from "../hooks/useDragAndDrop";
 import SidebarExpansionContext, {
   useSidebarExpansionState,
 } from "./SidebarExpansionContext";
-import DatabaseLink from "./DatabaseLink";
 import DocumentLink from "./DocumentLink";
 import DropCursor from "./DropCursor";
 import Folder from "./Folder";
@@ -51,7 +50,7 @@ function CollectionLinkChildren({
   // room for their own disclosure to the left of the label.
   const childDepth = Math.max(depth + 1, 2);
   const pageSize = DEFAULT_PAGE_SIZE;
-  const { documents, databases, ui } = useStores();
+  const { documents, ui } = useStores();
   const { t } = useTranslation();
   const activeDocument = documents.active;
   const childDocuments = useCollectionDocuments(collection, activeDocument);
@@ -68,10 +67,6 @@ function CollectionLinkChildren({
       setShowing((value) => value + pageSize);
     }
   }, [childDocuments, showing, pageSize]);
-
-  // databases are listed above the collection's documents, and their rows are
-  // reached through the database rather than the sidebar tree
-  const childDatabases = databases.inCollection(collection.id);
 
   const expansion = useSidebarExpansionState(
     childDocuments,
@@ -97,9 +92,6 @@ function CollectionLinkChildren({
         <DynamicDropCursor collection={collection} />
         <DocumentsLoader collection={collection} enabled={expanded}>
           {children}
-          {childDatabases.map((database) => (
-            <DatabaseLink key={database.id} database={database} />
-          ))}
           {!childDocuments && (
             <ResizingHeightContainer hideOverflow>
               <Loading />
@@ -117,19 +109,17 @@ function CollectionLinkChildren({
               index={index}
             />
           ))}
-          {childDocuments?.length === 0 &&
-            !children &&
-            childDatabases.length === 0 && (
-              <SidebarLink
-                label={
-                  <Text type="tertiary" size="small" italic>
-                    {t("Empty")}
-                  </Text>
-                }
-                onClick={() => history.push(collection.url)}
-                depth={childDepth}
-              />
-            )}
+          {childDocuments?.length === 0 && !children && (
+            <SidebarLink
+              label={
+                <Text type="tertiary" size="small" italic>
+                  {t("Empty")}
+                </Text>
+              }
+              onClick={() => history.push(collection.url)}
+              depth={childDepth}
+            />
+          )}
           {childDocuments && (
             <Waypoint key={showing} onEnter={showMore} fireOnRapidScroll />
           )}

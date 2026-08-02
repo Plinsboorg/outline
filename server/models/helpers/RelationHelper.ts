@@ -109,9 +109,17 @@ export class RelationHelper {
         );
       }
 
+      // a fresh mirror property is named after this database's anchor document
+      const anchor = existing
+        ? null
+        : await Document.unscoped().findByPk(database.id, {
+            attributes: ["id", "title"],
+            transaction,
+          });
+
       target.upsertProperty({
         id: inversePropertyId,
-        name: existing?.name ?? database.name,
+        name: existing?.name ?? anchor?.title ?? "Relation",
         type: PropertyType.Relation,
         config: {
           ...existing?.config,

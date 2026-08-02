@@ -1244,7 +1244,7 @@ describe("frontmatter properties", () => {
     it("should prepend frontmatter for rows of a database", async () => {
       const database = await buildDatabase({ dataSchema: schema });
       const document = await buildDocument({
-        collectionId: database.collectionId,
+        collectionId: database.document!.collectionId,
         databaseId: database.id,
         teamId: database.teamId,
         title: "My doc",
@@ -1263,7 +1263,7 @@ describe("frontmatter properties", () => {
     it("should not prepend frontmatter when not requested", async () => {
       const database = await buildDatabase({ dataSchema: schema });
       const document = await buildDocument({
-        collectionId: database.collectionId,
+        collectionId: database.document!.collectionId,
         databaseId: database.id,
         teamId: database.teamId,
         title: "My doc",

@@ -5,44 +5,38 @@ import ParanoidModel from "~/models/base/ParanoidModel";
 import Field from "./decorators/Field";
 
 /**
- * A set of documents sharing a typed property schema, scoped to a collection.
- * A collection may hold any number of databases, and a database can be moved
- * between collections — its rows move with it.
+ * A set of documents sharing a typed property schema. A database is anchored
+ * to the document with the same id — that document carries the database's
+ * identity (title, icon, location, starring, archived state), while this
+ * model carries the schema and views. The identity fields here are read-only
+ * projections from the anchor document; rename or move the document to change
+ * them.
  */
 export default class Database extends ParanoidModel {
   static modelName = "Database";
 
   store: DatabasesStore;
 
-  /** The name of the database. */
-  @Field
+  /** The anchor document's title, presented by the server for labelling. */
   @observable
   name: string;
 
-  /** An icon (or emoji) displayed alongside the database name. */
-  @Field
+  /** The anchor document's icon (or emoji). */
   @observable
   icon: string | null;
 
-  /** The color of the database icon. */
-  @Field
+  /** The color of the anchor document's icon. */
   @observable
   color: string | null;
-
-  /** Whether the database's page ignores the usual reading width. */
-  @Field
-  @observable
-  fullWidth: boolean;
 
   /** A custom display name for the title column; null means "Title". */
   @Field
   @observable
   titleName: string | null;
 
-  /** The collection this database belongs to. */
-  @Field
+  /** The collection the anchor document belongs to. */
   @observable
-  collectionId: string;
+  collectionId: string | null;
 
   /** The typed property definitions describing this database's columns. */
   @Field
@@ -69,16 +63,24 @@ export default class Database extends ParanoidModel {
     return this.name;
   }
 
-  /** The path to this database within the app. */
+  /** The anchor document, if it is loaded. */
+  @computed
+  get document() {
+    return this.store.rootStore.documents.get(this.id);
+  }
+
+  /** The path to this database within the app — its anchor document's page. */
   @computed
   get path(): string {
-    return `/database/${this.id}`;
+    return this.document?.path ?? `/doc/${this.id}`;
   }
 
   /** The collection this database belongs to, if it is loaded. */
   @computed
   get collection() {
-    return this.store.rootStore.collections.get(this.collectionId);
+    return this.collectionId
+      ? this.store.rootStore.collections.get(this.collectionId)
+      : undefined;
   }
 
   /**

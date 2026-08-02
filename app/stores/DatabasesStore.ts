@@ -1,8 +1,9 @@
 import invariant from "invariant";
 import { action, computed, runInAction } from "mobx";
-import type { DataView } from "@shared/types";
+import type { DataView, JSONObject } from "@shared/types";
 import Database from "~/models/Database";
 import type Document from "~/models/Document";
+import type { Properties } from "~/types";
 import { client } from "~/utils/ApiClient";
 import type RootStore from "./RootStore";
 import Store from "./base/Store";
@@ -10,6 +11,26 @@ import Store from "./base/Store";
 export default class DatabasesStore extends Store<Database> {
   constructor(rootStore: RootStore) {
     super(rootStore, Database);
+  }
+
+  /**
+   * Creates a database at the given location — at a collection root or
+   * nested under a parent document. The server creates the anchor document
+   * that carries the database's identity alongside the facet.
+   *
+   * @param params the database attributes plus the location to create it at.
+   * @param options extra request parameters.
+   * @returns the created database.
+   */
+  create(
+    params: Properties<Database> & {
+      collectionId?: string;
+      parentDocumentId?: string;
+      name?: string;
+    },
+    options?: JSONObject
+  ): Promise<Database> {
+    return super.create(params, options);
   }
 
   /**
@@ -55,42 +76,6 @@ export default class DatabasesStore extends Store<Database> {
       (database) =>
         database.collectionId === collectionId && !database.isArchived
     );
-
-  /** The archived databases currently loaded, in creation order. */
-  @computed
-  get archived(): Database[] {
-    return this.orderedData.filter((database) => database.isArchived);
-  }
-
-  /**
-   * Archives a database, hiding it and its rows until restored.
-   *
-   * @param database the database to archive.
-   */
-  @action
-  archive = async (database: Database) => {
-    const res = await client.post("/databases.archive", { id: database.id });
-    invariant(res?.data, "Data not available");
-    runInAction("DatabasesStore#archive", () => {
-      this.add(res.data);
-      this.addPolicies(res.policies);
-    });
-  };
-
-  /**
-   * Restores an archived database, bringing back the rows it took down.
-   *
-   * @param database the database to restore.
-   */
-  @action
-  restore = async (database: Database) => {
-    const res = await client.post("/databases.restore", { id: database.id });
-    invariant(res?.data, "Data not available");
-    runInAction("DatabasesStore#restore", () => {
-      this.add(res.data);
-      this.addPolicies(res.policies);
-    });
-  };
 
   /**
    * Persists a change to one of a database's saved views, leaving the other

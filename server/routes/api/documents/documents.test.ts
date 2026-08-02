@@ -6336,7 +6336,7 @@ describe("#documents.update properties", () => {
     const document = await buildDocument({
       teamId: team.id,
       userId: user.id,
-      collectionId: database.collectionId,
+      collectionId: database.document!.collectionId,
       databaseId: database.id,
     });
     return { team, user, database, document, statusId, priorityId };
@@ -6472,7 +6472,7 @@ describe("#documents.list property filters", () => {
       buildDocument({
         teamId: team.id,
         userId: user.id,
-        collectionId: database.collectionId,
+        collectionId: database.document!.collectionId,
         databaseId: database.id,
         title,
       });
@@ -6795,7 +6795,7 @@ describe("#documents.list databaseIndex sort", () => {
       buildDocument({
         teamId: team.id,
         userId: user.id,
-        collectionId: database.collectionId,
+        collectionId: database.document!.collectionId,
         databaseId: database.id,
         title,
         databaseIndex,

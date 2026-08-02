@@ -53,12 +53,6 @@ export const CommentValidation = {
 };
 
 export const DatabaseValidation = {
-  /** The maximum length of a database name */
-  maxNameLength: 100,
-
-  /** The maximum number of databases within a single collection */
-  maxPerCollection: 100,
-
   /** The maximum length of a row's fractional index */
   maxIndexLength: 256,
 };

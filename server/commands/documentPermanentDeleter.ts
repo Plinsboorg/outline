@@ -2,9 +2,10 @@ import { chunk, uniq } from "es-toolkit/compat";
 import { Op, QueryTypes } from "sequelize";
 import { sleep } from "@shared/utils/timers";
 import Logger from "@server/logging/Logger";
-import { Document, Attachment } from "@server/models";
+import { Database, Document, Attachment } from "@server/models";
 import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import { ProsemirrorHelper } from "@server/models/helpers/ProsemirrorHelper";
+import { RelationHelper } from "@server/models/helpers/RelationHelper";
 import DeleteAttachmentTask from "@server/queues/tasks/DeleteAttachmentTask";
 import { sequelize } from "@server/storage/database";
 
@@ -106,6 +107,24 @@ export default async function documentPermanentDeleter(documents: Document[]) {
         paranoid: false,
       }
     );
+  }
+
+  // documents anchoring a database take the database with them — the facet is
+  // removed by the foreign key cascade and the rows are detached by it, but
+  // mirror properties this database created on other databases have to be
+  // removed here, or they would point at a database that no longer exists
+  const facets = await Database.findAll({
+    where: { id: { [Op.in]: deletedIds } },
+  });
+  for (const facet of facets) {
+    const previousSchema = facet.dataSchema;
+    facet.dataSchema = [];
+    try {
+      await RelationHelper.syncInverseProperties(facet, previousSchema);
+    } catch (error) {
+      // a target database may itself be gone; that leaves nothing to clean
+      Logger.warn("Failed to remove mirror properties", { error });
+    }
   }
 
   // Small batch size and inter-batch sleep keep the exclusive lock window short

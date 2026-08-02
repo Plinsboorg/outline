@@ -88,19 +88,19 @@ describe("RollupHelper", () => {
     });
     const itemA = await buildDocument({
       teamId: team.id,
-      collectionId: itemDatabase.collectionId,
+      collectionId: itemDatabase.document!.collectionId,
       databaseId: itemDatabase.id,
       properties: { [priceId]: 10 },
     });
     const itemB = await buildDocument({
       teamId: team.id,
-      collectionId: itemDatabase.collectionId,
+      collectionId: itemDatabase.document!.collectionId,
       databaseId: itemDatabase.id,
       properties: { [priceId]: 30 },
     });
     const itemNoPrice = await buildDocument({
       teamId: team.id,
-      collectionId: itemDatabase.collectionId,
+      collectionId: itemDatabase.document!.collectionId,
       databaseId: itemDatabase.id,
     });
 
@@ -111,7 +111,7 @@ describe("RollupHelper", () => {
     });
     const document = await buildDocument({
       teamId: team.id,
-      collectionId: database.collectionId,
+      collectionId: database.document!.collectionId,
       databaseId: database.id,
       properties: { [relationId]: [itemA.id, itemB.id, itemNoPrice.id] },
     });
@@ -136,7 +136,7 @@ describe("RollupHelper", () => {
     });
     const document = await buildDocument({
       teamId: team.id,
-      collectionId: database.collectionId,
+      collectionId: database.document!.collectionId,
       databaseId: database.id,
     });
 
@@ -159,7 +159,7 @@ describe("RollupHelper", () => {
     });
     const document = await buildDocument({
       teamId: team.id,
-      collectionId: database.collectionId,
+      collectionId: database.document!.collectionId,
       databaseId: database.id,
     });
     // bypass the write-time validation to simulate stale data

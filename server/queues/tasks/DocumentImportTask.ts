@@ -101,10 +101,23 @@ export default class DocumentImportTask extends BaseTask<Props> {
       // properties rather than converted to a YAML codeblock. With no database
       // — or several — there is no schema to read the frontmatter against.
       const team = user.team ?? (await user.$get("team"));
-      const databases =
-        collectionId && team?.getPreference(TeamPreference.DocumentDatabases)
-          ? await Database.findAll({ where: { collectionId } })
+      let databases: Database[] = [];
+      if (
+        collectionId &&
+        team?.getPreference(TeamPreference.DocumentDatabases)
+      ) {
+        // a database lives wherever its anchor document does, so the
+        // collection's databases are the facets of its documents
+        const anchors = await Document.unscoped().findAll({
+          attributes: ["id"],
+          where: { collectionId },
+        });
+        databases = anchors.length
+          ? await Database.findAll({
+              where: { id: anchors.map((anchor) => anchor.id) },
+            })
           : [];
+      }
       const database = databases.length === 1 ? databases[0] : null;
       const extractFrontmatter = !!database;
 

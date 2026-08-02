@@ -31,6 +31,7 @@ import {
 } from "../hooks/useDragAndDrop";
 import { useIsDragActive, useSidebarScrollElement } from "./DragActiveContext";
 import { useSidebarExpansion } from "./SidebarExpansionContext";
+import DatabaseRowLinks from "./DatabaseRowLinks";
 import DocumentRow from "./DocumentRow";
 import DropCursor from "./DropCursor";
 import Folder from "./Folder";
@@ -60,12 +61,17 @@ const ROOT_MARGIN = "300px 0px";
 
 const DocumentLink = observer(function DocumentLink(props: Props) {
   const { node, collection, activeDocument } = props;
-  const { documents } = useStores();
+  const { documents, databases } = useStores();
   const expansion = useSidebarExpansion();
   const expanded = expansion.isExpanded(node.id);
   const isActiveDocument = activeDocument && activeDocument.id === node.id;
+  // a document sharing its id with a database anchors that database, and its
+  // rows are listed beneath it the way child documents would be
+  const database = databases.get(node.id);
   const hasChildDocuments =
-    !!node.children.length || activeDocument?.parentDocumentId === node.id;
+    !!node.children.length ||
+    activeDocument?.parentDocumentId === node.id ||
+    !!database;
   const sidebarContext = useSidebarContext();
   const activeSidebarContext = useActiveSidebarContext();
   const { fetchChildDocuments } = documents;
@@ -161,10 +167,16 @@ const DocumentLink = observer(function DocumentLink(props: Props) {
     <>
       <div ref={placeholderRef} style={{ minHeight: ROW_HEIGHT }}>
         {mounted ? (
-          <DocumentLinkInner {...props} hasChildren={nodeChildren.length > 0} />
+          <DocumentLinkInner
+            {...props}
+            hasChildren={nodeChildren.length > 0 || !!database}
+          />
         ) : null}
       </div>
       <Folder expanded={expanded}>
+        {database && (
+          <DatabaseRowLinks database={database} depth={props.depth + 1} />
+        )}
         {nodeChildren.map((childNode, childIndex) => (
           <DocumentLink
             key={childNode.id}
