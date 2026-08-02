@@ -123,8 +123,12 @@ function PropertyValueEditor({
         );
       }
       return (
+        // a text input rather than type="number": number inputs keep a fixed
+        // intrinsic width in Blink, which stops their table column from being
+        // resized narrow — parsing happens on commit either way
         <NudeInput
-          type="number"
+          type="text"
+          inputMode="decimal"
           defaultValue={typeof value === "number" ? String(value) : ""}
           placeholder={readOnly ? "–" : t("Empty")}
           onBlur={handleNumberCommit}
@@ -550,18 +554,6 @@ const NudeInput = styled.input`
   min-width: 0;
   padding: 4px 6px;
   border-radius: 4px;
-
-  /* a number input's spin buttons give it a large intrinsic minimum width,
-     which blocks its table column from being resized narrow — render it as
-     a plain text field instead */
-  &[type="number"] {
-    appearance: textfield;
-  }
-  &[type="number"]::-webkit-outer-spin-button,
-  &[type="number"]::-webkit-inner-spin-button {
-    appearance: none;
-    margin: 0;
-  }
 
   &:hover:not(:disabled),
   &:focus:not(:disabled) {
