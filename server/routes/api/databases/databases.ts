@@ -276,6 +276,20 @@ router.post(
             ?.autoNumber
       );
       await database.assignAutoNumbers(newlyAutoNumbered, { transaction });
+
+      // disabling auto-numbering empties the cells again — the numbers were
+      // machine-assigned, and re-enabling renumbers from scratch anyway
+      const newlyDisabled = (previousSchema ?? []).filter(
+        (property) =>
+          property.config?.autoNumber &&
+          database.dataSchema.some(
+            (item) => item.id === property.id && !item.config?.autoNumber
+          )
+      );
+      await database.clearPropertyValues(
+        newlyDisabled.map((property) => property.id),
+        { transaction }
+      );
     }
 
     ctx.body = {

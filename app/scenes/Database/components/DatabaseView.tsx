@@ -155,7 +155,11 @@ function DatabaseView({ database }: Props) {
         filter: activeView?.filter,
         summariesForViewId: activeView?.id,
       }),
-    [documents, database.id, activeView]
+    // schema is not part of the request, but a schema change can rewrite row
+    // values on the server — e.g. toggling auto-numbering — so rows are
+    // refetched whenever it changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [documents, database.id, activeView, schema]
   );
 
   React.useEffect(() => {

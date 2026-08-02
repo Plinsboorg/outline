@@ -377,6 +377,49 @@ class Database extends ParanoidModel<
   };
 
   /**
+   * Removes the stored values of the given properties from every row of this
+   * database. Called when auto-numbering is disabled, so the cells read empty
+   * again rather than freezing the last assigned numbers.
+   *
+   * @param propertyIds The ids of the properties whose values to clear
+   * @param options The transaction to write within, if any
+   */
+  clearPropertyValues = async (
+    propertyIds: string[],
+    { transaction }: { transaction?: Transaction } = {}
+  ): Promise<void> => {
+    if (propertyIds.length === 0) {
+      return;
+    }
+    const rows = await Document.unscoped().findAll({
+      where: { databaseId: this.id },
+      transaction,
+    });
+    for (const row of rows) {
+      if (!propertyIds.some((id) => row.properties && id in row.properties)) {
+        continue;
+      }
+      const next = { ...row.properties };
+      for (const id of propertyIds) {
+        delete next[id];
+      }
+      row.properties = next;
+    }
+    await Promise.all(
+      rows
+        .filter((row) => row.changed("properties"))
+        .map((row) =>
+          row.save({
+            transaction,
+            hooks: false,
+            silent: true,
+            fields: ["properties"],
+          })
+        )
+    );
+  };
+
+  /**
    * Builds the table view a new database starts with, showing every property.
    *
    * @param schema The data schema the view displays

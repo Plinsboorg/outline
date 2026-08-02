@@ -277,13 +277,19 @@ describe("#databases.update", () => {
     expect(first.properties[propertyId]).toEqual(1);
     expect(second.properties[propertyId]).toEqual(2);
 
-    // toggling off and on again renumbers from the configured start
+    // disabling clears the machine-assigned values
     await server.post("/api/databases.update", user, {
       body: {
         id: database.id,
         dataSchema: [{ id: propertyId, name: "ID", type: PropertyType.Number }],
       },
     });
+    await first.reload();
+    await second.reload();
+    expect(first.properties[propertyId]).toBeUndefined();
+    expect(second.properties[propertyId]).toBeUndefined();
+
+    // re-enabling renumbers from the configured start
     const res2 = await server.post("/api/databases.update", user, {
       body: {
         id: database.id,
