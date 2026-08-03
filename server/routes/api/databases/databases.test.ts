@@ -788,6 +788,120 @@ describe("#databases.move_row", () => {
   });
 });
 
+describe("row sub-items", () => {
+  it("should create a row nested under another row of the same database", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const parent = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+    });
+
+    const res = await server.post("/api/documents.create", user, {
+      body: {
+        title: "Sub-item",
+        databaseId: database.id,
+        parentDocumentId: parent.id,
+        publish: true,
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(body.data.parentDocumentId).toEqual(parent.id);
+    expect(body.data.databaseId).toEqual(database.id);
+  });
+
+  it("should reject a parent row belonging to another database", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const other = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const foreignRow = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: other.id,
+    });
+
+    const res = await server.post("/api/documents.create", user, {
+      body: {
+        title: "Sub-item",
+        databaseId: database.id,
+        parentDocumentId: foreignRow.id,
+        publish: true,
+      },
+    });
+    expect(res.status).toEqual(400);
+  });
+
+  it("should treat the anchor document as no parent at all", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+
+    const res = await server.post("/api/documents.create", user, {
+      body: {
+        title: "Row",
+        databaseId: database.id,
+        parentDocumentId: database.id,
+        publish: true,
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(body.data.parentDocumentId).toBeNull();
+    expect(body.data.databaseId).toEqual(database.id);
+  });
+
+  it("should trash sub-items together with their parent row", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const parent = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+    });
+    const child = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+      parentDocumentId: parent.id,
+    });
+
+    const res = await server.post("/api/documents.delete", user, {
+      body: { id: parent.id },
+    });
+    expect(res.status).toEqual(200);
+
+    const reloaded = await Document.findByPk(child.id, { paranoid: false });
+    expect(reloaded?.deletedAt).toBeTruthy();
+  });
+});
+
 describe("database lifecycle through the anchor document", () => {
   it("should trash the rows with the database and keep the facet", async () => {
     const { team, user, collection } = await buildEnabledTeam();

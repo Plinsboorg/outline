@@ -1,5 +1,5 @@
 import { observer } from "mobx-react";
-import { PlusIcon } from "outline-icons";
+import { CollapsedIcon, PlusIcon } from "outline-icons";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import styled from "styled-components";
@@ -27,6 +27,14 @@ type Props = {
   newRowId?: string;
   /** Callback when the inline title editing of a new row has finished. */
   onNewRowDone: () => void;
+  /** Indent depth by row id, for rows nested under another row. */
+  rowDepths: ReadonlyMap<string, number>;
+  /** Ids of rows that have sub-items, shown with a disclosure toggle. */
+  parentRowIds: ReadonlySet<string>;
+  /** Ids of rows whose sub-items are currently shown. */
+  expandedRowIds: ReadonlySet<string>;
+  /** Callback toggling a row's sub-items open or closed. */
+  onToggleRowExpand: (rowId: string) => void;
 };
 
 /**
@@ -43,6 +51,10 @@ function DatabaseList({
   onNewRow,
   newRowId,
   onNewRowDone,
+  rowDepths,
+  parentRowIds,
+  expandedRowIds,
+  onToggleRowExpand,
 }: Props) {
   const { t } = useTranslation();
 
@@ -73,6 +85,10 @@ function DatabaseList({
             properties={properties}
             isEditingTitle={document.id === newRowId}
             onTitleDone={onNewRowDone}
+            depth={rowDepths.get(document.id) ?? 0}
+            hasSubItems={parentRowIds.has(document.id)}
+            isExpanded={expandedRowIds.has(document.id)}
+            onToggleExpand={onToggleRowExpand}
           />
         ))}
         {newRowButton}
@@ -122,15 +138,26 @@ const ListRow = observer(function ListRow_({
   properties,
   isEditingTitle,
   onTitleDone,
+  depth = 0,
+  hasSubItems = false,
+  isExpanded = false,
+  onToggleExpand,
 }: {
   document: Document;
   properties: Property[];
   isEditingTitle: boolean;
   onTitleDone: () => void;
+  depth?: number;
+  hasSubItems?: boolean;
+  isExpanded?: boolean;
+  onToggleExpand?: (rowId: string) => void;
 }) {
+  const { t } = useTranslation();
+  const indentStyle = depth > 0 ? { paddingLeft: 12 + depth * 20 } : undefined;
+
   if (isEditingTitle) {
     return (
-      <Row>
+      <Row style={indentStyle}>
         <TitleInputWrapper>
           <RowTitleInput document={document} onDone={onTitleDone} />
         </TitleInputWrapper>
@@ -139,7 +166,18 @@ const ListRow = observer(function ListRow_({
   }
 
   return (
-    <Row>
+    <Row style={indentStyle}>
+      {hasSubItems && onToggleExpand && (
+        <DisclosureButton
+          type="button"
+          onClick={() => onToggleExpand(document.id)}
+          aria-expanded={isExpanded}
+          aria-label={isExpanded ? t("Collapse") : t("Expand")}
+          $expanded={isExpanded}
+        >
+          <CollapsedIcon size={18} />
+        </DisclosureButton>
+      )}
       <RowTitle to={document.path}>{document.titleWithDefault}</RowTitle>
       <RowValues>
         {properties.map((property) => {
@@ -225,6 +263,23 @@ const RowValue = styled.span`
 
 const TitleInputWrapper = styled.div`
   flex-grow: 1;
+`;
+
+const DisclosureButton = styled(NudeButton)<{ $expanded: boolean }>`
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-right: -6px;
+  color: ${s("textSecondary")};
+
+  svg {
+    transition: transform 100ms ease;
+    transform: rotate(${(props) => (props.$expanded ? "0deg" : "-90deg")});
+  }
+
+  &:hover {
+    color: ${s("text")};
+  }
 `;
 
 const NewRow = styled.div`

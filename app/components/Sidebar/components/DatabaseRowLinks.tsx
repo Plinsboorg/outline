@@ -34,7 +34,13 @@ function DatabaseRowLinks({ database, depth }: Props) {
   const location = useLocation();
   const handleDeleteRow = useDeleteRow();
 
-  const rows = documents.inDatabase(database.id);
+  // sub-items are reached through their parent row, so the sidebar lists
+  // only the database's top-level rows
+  const allRows = documents.inDatabase(database.id);
+  const rowIds = new Set(allRows.map((row) => row.id));
+  const rows = allRows.filter(
+    (row) => !row.parentDocumentId || !rowIds.has(row.parentDocumentId)
+  );
 
   React.useEffect(() => {
     void documents

@@ -20,7 +20,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { observer } from "mobx-react";
-import { PlusIcon } from "outline-icons";
+import { CollapsedIcon, PlusIcon } from "outline-icons";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -90,6 +90,16 @@ type Props = {
   onMoveRow?: (documentId: string, overDocumentId: string) => void;
   /** Callback deleting a row; absent when the user may not delete rows. */
   onDeleteRow?: (document: Document) => void;
+  /** Indent depth by row id, for rows nested under another row. */
+  rowDepths: ReadonlyMap<string, number>;
+  /** Ids of rows that have sub-items, shown with a disclosure toggle. */
+  parentRowIds: ReadonlySet<string>;
+  /** Ids of rows whose sub-items are currently shown. */
+  expandedRowIds: ReadonlySet<string>;
+  /** Callback toggling a row's sub-items open or closed. */
+  onToggleRowExpand: (rowId: string) => void;
+  /** Callback creating a sub-item under a row; absent when not allowed. */
+  onAddSubItem?: (parent: Document) => void;
   /** The property-visibility toggle to render beside the add button. */
   propertiesToggle?: React.ReactNode;
   /** The active view, holding each column's chosen summary. */
@@ -133,6 +143,11 @@ function DatabaseTable({
   onMoveProperty,
   onMoveRow,
   onDeleteRow,
+  rowDepths,
+  parentRowIds,
+  expandedRowIds,
+  onToggleRowExpand,
+  onAddSubItem,
   propertiesToggle,
   view,
   summaries,
@@ -265,6 +280,11 @@ function DatabaseTable({
           hasControlsColumn={hasControlsColumn}
           isSortable={hasGripColumn}
           onDelete={onDeleteRow}
+          depth={rowDepths.get(document.id) ?? 0}
+          hasSubItems={parentRowIds.has(document.id)}
+          isExpanded={expandedRowIds.has(document.id)}
+          onToggleExpand={onToggleRowExpand}
+          onAddSubItem={onAddSubItem}
         />
       ))}
       {rows.length === 0 && !onNewRow && (
@@ -655,6 +675,11 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
   hasControlsColumn,
   isSortable,
   onDelete,
+  depth,
+  hasSubItems,
+  isExpanded,
+  onToggleExpand,
+  onAddSubItem,
 }: {
   document: Document;
   properties: Property[];
@@ -664,6 +689,11 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
   hasControlsColumn: boolean;
   isSortable: boolean;
   onDelete?: (document: Document) => void;
+  depth: number;
+  hasSubItems: boolean;
+  isExpanded: boolean;
+  onToggleExpand: (rowId: string) => void;
+  onAddSubItem?: (parent: Document) => void;
 }) {
   const { t } = useTranslation();
   const can = usePolicy(document);
@@ -736,21 +766,38 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
         )),
         titleIndex,
         <TitleCell key={TITLE_COLUMN_ID}>
-          {isEditingTitle ? (
-            <TitleInputPadding>
-              <RowTitleInput document={document} onDone={onTitleDone} />
-            </TitleInputPadding>
-          ) : (
-            <TitleLink to={document.path}>
-              {document.titleWithDefault}
-            </TitleLink>
-          )}
+          <TitleContent style={{ paddingLeft: depth * 20 }}>
+            {hasSubItems && (
+              <DisclosureButton
+                type="button"
+                onClick={() => onToggleExpand(document.id)}
+                aria-expanded={isExpanded}
+                aria-label={isExpanded ? t("Collapse") : t("Expand")}
+                $expanded={isExpanded}
+              >
+                <CollapsedIcon size={18} />
+              </DisclosureButton>
+            )}
+            {isEditingTitle ? (
+              <TitleInputPadding>
+                <RowTitleInput document={document} onDone={onTitleDone} />
+              </TitleInputPadding>
+            ) : (
+              <TitleLink to={document.path}>
+                {document.titleWithDefault}
+              </TitleLink>
+            )}
+          </TitleContent>
         </TitleCell>
       )}
       {hasControlsColumn && (
         <RowControlsCell>
           {onDelete && (
-            <DatabaseRowMenu document={document} onDelete={onDelete} />
+            <DatabaseRowMenu
+              document={document}
+              onDelete={onDelete}
+              onAddSubItem={onAddSubItem}
+            />
           )}
         </RowControlsCell>
       )}
@@ -927,6 +974,28 @@ const TitleCell = styled(Cell)`
   padding: 0;
 `;
 
+const TitleContent = styled.div`
+  display: flex;
+  align-items: center;
+`;
+
+const DisclosureButton = styled(NudeButton)<{ $expanded: boolean }>`
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-left: 4px;
+  color: ${s("textSecondary")};
+
+  svg {
+    transition: transform 100ms ease;
+    transform: rotate(${(props) => (props.$expanded ? "0deg" : "-90deg")});
+  }
+
+  &:hover {
+    color: ${s("text")};
+  }
+`;
+
 /** The invisible drag strip along a header cell's right edge for resizing. */
 const ResizeGrip = styled.div`
   position: absolute;
@@ -947,10 +1016,12 @@ const ResizeGrip = styled.div`
 
 const TitleInputPadding = styled.div`
   padding: 6px;
+  flex-grow: 1;
 `;
 
 const TitleLink = styled(Link)`
   display: block;
+  flex-grow: 1;
   color: ${s("text")};
   font-weight: 500;
   padding: 8px 10px;

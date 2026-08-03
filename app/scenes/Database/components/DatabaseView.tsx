@@ -47,6 +47,7 @@ import DatabaseTable from "./DatabaseTable";
 import DatabaseTableFilter from "./DatabaseTableFilter";
 import DatabaseViewProperties from "./DatabaseViewProperties";
 import DatabaseViewTabs from "./DatabaseViewTabs";
+import { buildRowTree } from "./rowTree";
 
 type Props = {
   /** The database to render. */
@@ -79,6 +80,9 @@ function DatabaseView({ database }: Props) {
   const [newRowId, setNewRowId] = React.useState<string>();
   const [isFilterOpen, setIsFilterOpen] = React.useState(false);
   const [isSortOpen, setIsSortOpen] = React.useState(false);
+  const [expandedRowIds, setExpandedRowIds] = React.useState<
+    ReadonlySet<string>
+  >(new Set());
   const isCreatingRef = React.useRef(false);
 
   // rows are held in local state here, so the deleted one has to be dropped
@@ -139,6 +143,10 @@ function DatabaseView({ database }: Props) {
     groupByProperty && isGroupableProperty(groupByProperty)
       ? groupByProperty
       : groupableProperties[0];
+  const listGroupProperty =
+    groupByProperty && isGroupableProperty(groupByProperty)
+      ? groupByProperty
+      : undefined;
 
   const viewType =
     activeView?.type === DataViewType.Board && groupableProperties.length === 0
@@ -267,6 +275,53 @@ function DatabaseView({ database }: Props) {
   const handleNewRowDone = React.useCallback(() => {
     setNewRowId(undefined);
   }, []);
+
+  // sub-items are rows parented under another row of the same database;
+  // table and list views show them indented under their expanded parent
+  const rowTree = React.useMemo(
+    () => buildRowTree(rows ?? [], expandedRowIds),
+    [rows, expandedRowIds]
+  );
+
+  const handleToggleRowExpand = React.useCallback((rowId: string) => {
+    setExpandedRowIds((current) => {
+      const next = new Set(current);
+      if (next.has(rowId)) {
+        next.delete(rowId);
+      } else {
+        next.add(rowId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleNewSubItem = React.useCallback(
+    async (parent: Document) => {
+      if (isCreatingRef.current) {
+        return;
+      }
+      isCreatingRef.current = true;
+      try {
+        const document = await documents.create(
+          {
+            title: "",
+            collectionId: database.collectionId ?? undefined,
+            databaseId: database.id,
+            parentDocumentId: parent.id,
+          },
+          { publish: true }
+        );
+        setRows((current) => [...(current ?? []), document]);
+        setExpandedRowIds((current) => new Set(current).add(parent.id));
+        setNewRowId(document.id);
+      } catch (error) {
+        toast.error(errToString(error));
+      } finally {
+        isCreatingRef.current = false;
+      }
+    },
+    [documents, database]
+  );
 
   // plain-row variant for views that create without a preset group value, so
   // DOM click events are never mistaken for the group argument.
@@ -680,17 +735,19 @@ function DatabaseView({ database }: Props) {
         />
       ) : viewType === DataViewType.List ? (
         <DatabaseList
-          rows={rows}
+          // grouping splits rows apart, so sub-items are shown flat there —
+          // only the ungrouped list nests them under their parent
+          rows={listGroupProperty ? rows : rowTree.visibleRows}
           properties={visibleProperties}
-          groupByProperty={
-            groupByProperty && isGroupableProperty(groupByProperty)
-              ? groupByProperty
-              : undefined
-          }
+          groupByProperty={listGroupProperty}
           hasFilter={!!filter}
           onNewRow={can.createRow ? handleNewRowPlain : undefined}
           newRowId={newRowId}
           onNewRowDone={handleNewRowDone}
+          rowDepths={rowTree.depthById}
+          parentRowIds={rowTree.parentIds}
+          expandedRowIds={expandedRowIds}
+          onToggleRowExpand={handleToggleRowExpand}
         />
       ) : viewType === DataViewType.Gallery ? (
         <DatabaseGallery
@@ -704,7 +761,7 @@ function DatabaseView({ database }: Props) {
         />
       ) : (
         <DatabaseTable
-          rows={rows}
+          rows={rowTree.visibleRows}
           properties={visibleProperties}
           titleIndex={titleIndex}
           titleName={database.titleName ?? undefined}
@@ -725,9 +782,19 @@ function DatabaseView({ database }: Props) {
           onDeleteProperty={handleDeleteProperty}
           onDeleteRow={handleDeleteRow}
           onMoveProperty={can.update ? handleMoveProperty : undefined}
-          // a sorted view derives its order from the sort, so rows can only be
-          // arranged by hand while no sort is applied
-          onMoveRow={can.update && !sort ? handleMoveRow : undefined}
+          // a sorted view derives its order from the sort, so rows can only
+          // be arranged by hand while no sort is applied — and not while
+          // sub-items nest the display order, which dragging would scramble
+          onMoveRow={
+            can.update && !sort && !rowTree.hasNesting
+              ? handleMoveRow
+              : undefined
+          }
+          rowDepths={rowTree.depthById}
+          parentRowIds={rowTree.parentIds}
+          expandedRowIds={expandedRowIds}
+          onToggleRowExpand={handleToggleRowExpand}
+          onAddSubItem={can.createRow ? handleNewSubItem : undefined}
           propertiesToggle={
             can.update && schema.length > 0 ? (
               <DatabaseViewProperties

@@ -116,7 +116,9 @@ router.post(
 
     const document = await documentCreator(ctx, {
       title: name || "Untitled database",
-      icon: icon ?? undefined,
+      // a database icon by default, so databases are recognizable among
+      // ordinary documents in the sidebar and search
+      icon: icon ?? "database",
       color: color ?? undefined,
       collectionId: collection?.id,
       parentDocumentId,

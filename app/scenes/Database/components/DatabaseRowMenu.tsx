@@ -1,6 +1,6 @@
 import copy from "copy-to-clipboard";
 import { observer } from "mobx-react";
-import { CopyIcon, OpenIcon, TrashIcon } from "outline-icons";
+import { CopyIcon, OpenIcon, PlusIcon, TrashIcon } from "outline-icons";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -19,6 +19,8 @@ type Props = {
   document: Document;
   /** Callback to delete the row, which confirms before deleting. */
   onDelete: (document: Document) => void;
+  /** Callback creating a sub-item under this row; absent when not allowed. */
+  onAddSubItem?: (parent: Document) => void;
 };
 
 /**
@@ -28,7 +30,7 @@ type Props = {
  * A row is an ordinary document, so these delegate to the document itself
  * rather than to anything database-specific.
  */
-function DatabaseRowMenu({ document, onDelete }: Props) {
+function DatabaseRowMenu({ document, onDelete, onAddSubItem }: Props) {
   const { t } = useTranslation();
   const can = usePolicy(document);
 
@@ -40,6 +42,10 @@ function DatabaseRowMenu({ document, onDelete }: Props) {
     copy(urlify(document.path));
     toast.success(t("Link copied to clipboard"));
   }, [t, document]);
+
+  const handleAddSubItem = React.useCallback(() => {
+    onAddSubItem?.(document);
+  }, [onAddSubItem, document]);
 
   const handleDelete = React.useCallback(() => {
     onDelete(document);
@@ -60,6 +66,13 @@ function DatabaseRowMenu({ document, onDelete }: Props) {
         perform: handleCopyLink,
       }),
       createAction({
+        name: t("Add sub-item"),
+        section: ActiveDocumentSection,
+        icon: <PlusIcon />,
+        visible: !!onAddSubItem,
+        perform: handleAddSubItem,
+      }),
+      createAction({
         name: `${t("Delete")}…`,
         section: ActiveDocumentSection,
         icon: <TrashIcon />,
@@ -68,7 +81,15 @@ function DatabaseRowMenu({ document, onDelete }: Props) {
         perform: handleDelete,
       }),
     ],
-    [t, can.delete, handleOpen, handleCopyLink, handleDelete]
+    [
+      t,
+      can.delete,
+      onAddSubItem,
+      handleOpen,
+      handleCopyLink,
+      handleAddSubItem,
+      handleDelete,
+    ]
   );
   const rootAction = useMenuAction(actions);
 

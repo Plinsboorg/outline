@@ -1851,6 +1851,7 @@ router.post(
     // a row is created inside its database, and inherits the anchor
     // document's collection so it stays readable by exactly the same people
     let database: Database | null = null;
+    let rowParentDocumentId = parentDocumentId;
     if (databaseId) {
       database = await Database.findByPk(databaseId, { transaction });
       if (database) {
@@ -1862,11 +1863,27 @@ router.post(
         });
       }
       authorize(user, "createRow", database);
+
+      // a sub-item is a row nested under another row of the same database.
+      // Parenting a row under the anchor document itself adds nothing over
+      // the databaseId and is treated as no parent at all.
+      if (rowParentDocumentId === databaseId) {
+        rowParentDocumentId = null;
+      } else if (rowParentDocumentId) {
+        const parentRow = await Document.findByPk(rowParentDocumentId, {
+          transaction,
+        });
+        if (parentRow?.databaseId !== databaseId) {
+          throw ValidationError(
+            "parentDocumentId must be a row of the same database"
+          );
+        }
+      }
     }
 
     const { collection } = await authorizeDocumentCreate(ctx, {
       collectionId: database?.document?.collectionId ?? collectionId,
-      parentDocumentId,
+      parentDocumentId: rowParentDocumentId,
     });
 
     let template: Template | null | undefined;
@@ -1899,7 +1916,7 @@ router.post(
       index,
       collectionId: collection?.id,
       databaseId: database?.id,
-      parentDocumentId,
+      parentDocumentId: rowParentDocumentId,
       template,
       fullWidth,
       editorVersion,
