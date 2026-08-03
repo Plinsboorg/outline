@@ -155,6 +155,11 @@ export const DatabasesMoveRowSchema = BaseSchema.extend({
   body: BaseIdSchema.extend({
     /** The row to move, which must belong to the database */
     documentId: zodIdType(),
+    /**
+     * The row to nest the moved row under; null moves it to the top level.
+     * Omitted entirely, the row keeps its current parent.
+     */
+    parentDocumentId: zodIdType().nullish(),
     /** The fractional index to move the row to */
     index: z
       .string()

@@ -460,13 +460,46 @@ function DatabaseView({ database }: Props) {
         return;
       }
 
+      // dropping next to a row makes the moved row its sibling, so dragging
+      // can also pull a sub-item out to the top level or nest it elsewhere
+      const ids = new Set(rows.map((row) => row.id));
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      const effectiveParent = (row: Document): string | null =>
+        row.parentDocumentId && ids.has(row.parentDocumentId)
+          ? row.parentDocumentId
+          : null;
+      const targetParentId = effectiveParent(rows[to]);
+
+      // nesting a row inside its own subtree would orphan the whole branch
+      let ancestorId = targetParentId;
+      while (ancestorId) {
+        if (ancestorId === documentId) {
+          toast.error(t("A row cannot be nested under its own sub-item"));
+          return;
+        }
+        const ancestor = byId.get(ancestorId);
+        ancestorId = ancestor ? effectiveParent(ancestor) : null;
+      }
+
       const previousRows = rows;
       const reordered = arrayMove(rows, from, to);
-      // the neighbours the row lands between decide its new index; a neighbour
-      // without one has never been ordered and sorts last regardless, so an
-      // unbounded index on that side is what we want
-      const before = reordered[to - 1]?.databaseIndex ?? null;
-      const after = reordered[to + 1]?.databaseIndex ?? null;
+      // the nearest neighbours in the same sibling group decide the new
+      // index; a neighbour without one has never been ordered and sorts last
+      // regardless, so an unbounded index on that side is what we want
+      let before: string | null = null;
+      for (let i = to - 1; i >= 0; i--) {
+        if (effectiveParent(reordered[i]) === targetParentId) {
+          before = reordered[i].databaseIndex ?? null;
+          break;
+        }
+      }
+      let after: string | null = null;
+      for (let i = to + 1; i < reordered.length; i++) {
+        if (effectiveParent(reordered[i]) === targetParentId) {
+          after = reordered[i].databaseIndex ?? null;
+          break;
+        }
+      }
 
       let index: string;
       try {
@@ -477,12 +510,17 @@ function DatabaseView({ database }: Props) {
       }
 
       setRows(reordered);
-      void databases.moveRow(database, reordered[to], index).catch((error) => {
-        toast.error(errToString(error));
-        setRows(previousRows);
-      });
+      if (targetParentId) {
+        setExpandedRowIds((current) => new Set(current).add(targetParentId));
+      }
+      void databases
+        .moveRow(database, reordered[to], index, targetParentId)
+        .catch((error) => {
+          toast.error(errToString(error));
+          setRows(previousRows);
+        });
     },
-    [rows, databases, database]
+    [rows, databases, database, t]
   );
 
   const handleResizeColumn = React.useCallback(
@@ -783,13 +821,8 @@ function DatabaseView({ database }: Props) {
           onDeleteRow={handleDeleteRow}
           onMoveProperty={can.update ? handleMoveProperty : undefined}
           // a sorted view derives its order from the sort, so rows can only
-          // be arranged by hand while no sort is applied — and not while
-          // sub-items nest the display order, which dragging would scramble
-          onMoveRow={
-            can.update && !sort && !rowTree.hasNesting
-              ? handleMoveRow
-              : undefined
-          }
+          // be arranged by hand while no sort is applied
+          onMoveRow={can.update && !sort ? handleMoveRow : undefined}
           rowDepths={rowTree.depthById}
           parentRowIds={rowTree.parentIds}
           expandedRowIds={expandedRowIds}

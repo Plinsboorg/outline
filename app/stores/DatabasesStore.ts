@@ -98,32 +98,44 @@ export default class DatabasesStore extends Store<Database> {
   };
 
   /**
-   * Moves a row to a new position in its database's manual order, applying the
-   * new index locally straight away and rolling it back if the request fails.
+   * Moves a row to a new position in its database's manual order — and
+   * optionally under a new parent row — applying the change locally straight
+   * away and rolling it back if the request fails.
    *
    * @param database the database the row belongs to.
    * @param document the row to move.
    * @param index the fractional index to move the row to.
+   * @param parentDocumentId the row to nest under; null moves to the top
+   *   level, undefined keeps the current parent.
    * @throws if the row could not be moved.
    */
   @action
   moveRow = async (
     database: Database,
     document: Document,
-    index: string
+    index: string,
+    parentDocumentId?: string | null
   ): Promise<void> => {
     const previousIndex = document.databaseIndex;
+    const previousParentId = document.parentDocumentId;
     document.databaseIndex = index;
+    if (parentDocumentId !== undefined) {
+      document.parentDocumentId = parentDocumentId ?? undefined;
+    }
 
     try {
       await client.post("/databases.move_row", {
         id: database.id,
         documentId: document.id,
         index,
+        ...(parentDocumentId !== undefined ? { parentDocumentId } : {}),
       });
     } catch (error) {
       runInAction("DatabasesStore#moveRow", () => {
         document.databaseIndex = previousIndex;
+        if (parentDocumentId !== undefined) {
+          document.parentDocumentId = previousParentId;
+        }
       });
       throw error;
     }

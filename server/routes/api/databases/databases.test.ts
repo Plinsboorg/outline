@@ -664,6 +664,129 @@ describe("#databases.move_row", () => {
     expect(row.databaseIndex).toEqual("P");
   });
 
+  it("should nest a row under another and pull it back out", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const parent = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+    });
+    const row = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+    });
+
+    const nested = await server.post("/api/databases.move_row", user, {
+      body: {
+        id: database.id,
+        documentId: row.id,
+        index: "P",
+        parentDocumentId: parent.id,
+      },
+    });
+    expect(nested.status).toEqual(200);
+    await row.reload();
+    expect(row.parentDocumentId).toEqual(parent.id);
+
+    const unnested = await server.post("/api/databases.move_row", user, {
+      body: {
+        id: database.id,
+        documentId: row.id,
+        index: "Q",
+        parentDocumentId: null,
+      },
+    });
+    expect(unnested.status).toEqual(200);
+    await row.reload();
+    expect(row.parentDocumentId).toBeNull();
+  });
+
+  it("should reject nesting a row under its own sub-item", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const parent = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+    });
+    const child = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+      parentDocumentId: parent.id,
+    });
+
+    const res = await server.post("/api/databases.move_row", user, {
+      body: {
+        id: database.id,
+        documentId: parent.id,
+        index: "P",
+        parentDocumentId: child.id,
+      },
+    });
+    expect(res.status).toEqual(400);
+
+    const self = await server.post("/api/databases.move_row", user, {
+      body: {
+        id: database.id,
+        documentId: parent.id,
+        index: "P",
+        parentDocumentId: parent.id,
+      },
+    });
+    expect(self.status).toEqual(400);
+  });
+
+  it("should reject a parent from another database", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const other = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const row = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+    });
+    const foreignRow = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: other.id,
+    });
+
+    const res = await server.post("/api/databases.move_row", user, {
+      body: {
+        id: database.id,
+        documentId: row.id,
+        index: "P",
+        parentDocumentId: foreignRow.id,
+      },
+    });
+    expect(res.status).toEqual(400);
+  });
+
   it("should reject a row belonging to another database", async () => {
     const { team, user, collection } = await buildEnabledTeam();
     const database = await buildDatabase({

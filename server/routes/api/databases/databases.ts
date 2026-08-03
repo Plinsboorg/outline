@@ -243,7 +243,7 @@ router.post(
   validate(T.DatabasesMoveRowSchema),
   transaction(),
   async (ctx: APIContext<T.DatabasesMoveRowReq>) => {
-    const { id, documentId, index } = ctx.input.body;
+    const { id, documentId, index, parentDocumentId } = ctx.input.body;
     const { user } = ctx.state.auth;
     const { transaction } = ctx.state;
     authorizeFeature(ctx);
@@ -270,6 +270,46 @@ router.post(
     });
     if (document.databaseId !== database.id) {
       throw ValidationError("Document is not a row of this database");
+    }
+
+    // a move may also reparent the row: under another row of the same
+    // database, or back to the top level
+    if (parentDocumentId !== undefined) {
+      if (parentDocumentId === document.id) {
+        throw ValidationError("A row cannot be its own parent");
+      }
+      if (parentDocumentId) {
+        const parent = await Document.findByPk(parentDocumentId, {
+          transaction,
+          rejectOnEmpty: true,
+        });
+        if (parent.databaseId !== database.id) {
+          throw ValidationError(
+            "parentDocumentId must be a row of the same database"
+          );
+        }
+
+        // walking up from the new parent must never reach the moved row, or
+        // the row's subtree would be detached into a cycle
+        const seen = new Set<string>([parent.id]);
+        let ancestorId = parent.parentDocumentId;
+        while (ancestorId) {
+          if (ancestorId === document.id) {
+            throw ValidationError(
+              "A row cannot be nested under its own sub-item"
+            );
+          }
+          if (seen.has(ancestorId)) {
+            break;
+          }
+          seen.add(ancestorId);
+          const ancestor = await Document.findByPk(ancestorId, {
+            transaction,
+          });
+          ancestorId = ancestor?.parentDocumentId ?? null;
+        }
+      }
+      document.parentDocumentId = parentDocumentId;
     }
 
     document.databaseIndex = index;
