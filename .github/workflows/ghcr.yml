@@ -7,7 +7,7 @@ name: Build fork image (ghcr)
 on:
   push:
     branches:
-      - "feat/standalone-databases-**"
+      - "feat/**"
   workflow_dispatch:
 
 env:
@@ -47,16 +47,20 @@ jobs:
       - name: Build runtime image
         run: |
           SHA="$(git rev-parse --short HEAD)"
+          # moving tag follows the branch, so each feature branch gets its own
+          # rather than every branch overwriting a single shared one
+          BRANCH="${GITHUB_REF_NAME//\//-}"
           docker build \
             --file Dockerfile \
             --build-arg BASE_IMAGE=outline-base:local \
             --tag "$IMAGE:$SHA" \
-            --tag "$IMAGE:db-phase6" \
+            --tag "$IMAGE:$BRANCH" \
             .
           echo "SHA=$SHA" >> "$GITHUB_ENV"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
 
       - name: Push
         run: |
           docker push "$IMAGE:$SHA"
-          docker push "$IMAGE:db-phase6"
+          docker push "$IMAGE:$BRANCH"
           echo "### Pushed \`$IMAGE:$SHA\`" >> "$GITHUB_STEP_SUMMARY"
