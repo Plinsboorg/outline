@@ -14,6 +14,7 @@ import { IconType, TOCPosition, TeamPreference } from "@shared/types";
 import { determineIconType } from "@shared/utils/icon";
 import type Document from "~/models/Document";
 import type Revision from "~/models/Revision";
+import DatabaseDocumentTitle from "~/components/Database/DatabaseDocumentTitle";
 import DocumentDatabase from "~/components/Database/DocumentDatabase";
 import DocumentMove from "~/components/DocumentExplorer/DocumentMove";
 import DocumentPublish from "~/scenes/DocumentPublish";
@@ -82,12 +83,23 @@ function DocumentScene({
   onCreateLink,
   children,
 }: Props) {
-  const { auth, ui, dialogs } = useStores();
+  const { auth, ui, dialogs, databases } = useStores();
   const { t } = useTranslation();
   const history = useHistory();
   const location = useLocation<LocationState>();
   const sidebarContext = useLocationSidebarContext();
   const { team, user } = auth;
+
+  // whether this document anchors a database is answered by the databases
+  // store, which the sidebar usually loads; this covers direct navigation
+  const databasesEnabled = !!team?.getPreference(
+    TeamPreference.DocumentDatabases
+  );
+  React.useEffect(() => {
+    if (databasesEnabled && !databases.isLoaded && !databases.isFetching) {
+      void databases.fetchAll();
+    }
+  }, [databasesEnabled, databases]);
 
   const editorRef = useRef<TEditor>(null);
 
@@ -284,6 +296,13 @@ function DocumentScene({
   const multiplayerEditor =
     !document.isArchived && !document.isDeleted && !revision && !isShare;
 
+  // a document sharing its id with a database anchors that database; its
+  // page shows the database's views in place of a text body
+  const isDatabaseDocument =
+    !isShare &&
+    !!auth.team?.getPreference(TeamPreference.DocumentDatabases) &&
+    !!databases.get(document.id);
+
   const hasEmojiInTitle = determineIconType(document.icon) === IconType.Emoji;
   const pageTitle = hasEmojiInTitle
     ? document.titleWithDefault.replace(document.icon!, "")
@@ -377,6 +396,15 @@ function DocumentScene({
                     revision={revision}
                     id={revision.id}
                   />
+                ) : isDatabaseDocument ? (
+                  <>
+                    <Notices document={document} readOnly={readOnly} />
+                    <DatabaseDocumentTitle document={document} />
+                    <DocumentDatabase document={document} />
+                    <ReferencesWrapper>
+                      <References document={document} />
+                    </ReferencesWrapper>
+                  </>
                 ) : (
                   <>
                     <Notices document={document} readOnly={readOnly} />
@@ -410,7 +438,6 @@ function DocumentScene({
                       canComment={abilities.comment}
                       autoFocus={document.createdAt === document.updatedAt}
                     >
-                      <DocumentDatabase document={document} />
                       <ReferencesWrapper>
                         <References document={document} />
                       </ReferencesWrapper>

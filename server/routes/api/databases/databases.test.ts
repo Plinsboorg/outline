@@ -223,6 +223,10 @@ describe("#databases.list", () => {
     expect(abilities?.read).toBe(true);
     expect(abilities?.createRow).toBe(true);
     expect(abilities?.update).toBe(true);
+    // the anchor document's abilities ride along under the shared id, so the
+    // client keeps move/star/menu working on the database's document
+    expect(abilities?.move).toBe(true);
+    expect(abilities?.star).toBe(true);
   });
 });
 

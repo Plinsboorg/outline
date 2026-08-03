@@ -11,6 +11,7 @@ import validate from "@server/middlewares/validate";
 import documentCreator, {
   authorizeDocumentCreate,
 } from "@server/commands/documentCreator";
+import type { User } from "@server/models";
 import { Database, Document } from "@server/models";
 import { RelationHelper } from "@server/models/helpers/RelationHelper";
 import { authorize } from "@server/policies";
@@ -26,6 +27,32 @@ function authorizeFeature(ctx: APIContext) {
   if (!user.team.getPreference(TeamPreference.DocumentDatabases)) {
     throw ValidationError("Document databases are currently disabled");
   }
+}
+
+/**
+ * Presents the policies of databases merged with their anchor documents'
+ * abilities. The two models share an id and the client keeps one policy per
+ * id, so the single entry has to carry both sets — otherwise a databases
+ * response would strip the document abilities (disabling move, star and the
+ * document menu on the anchor) and a later documents response would strip
+ * the database ones (hiding row creation).
+ */
+function presentMergedPolicies(user: User, databases: Database[]) {
+  const policies = presentPolicies(user, databases);
+  const documentPolicies = presentPolicies(
+    user,
+    databases.map((database) => database.document ?? null)
+  );
+  const documentPolicyById = new Map(
+    documentPolicies.map((policy) => [policy.id, policy])
+  );
+  for (const policy of policies) {
+    const documentPolicy = documentPolicyById.get(policy.id);
+    if (documentPolicy) {
+      policy.abilities = { ...documentPolicy.abilities, ...policy.abilities };
+    }
+  }
+  return policies;
 }
 
 router.post(
@@ -66,7 +93,7 @@ router.post(
 
     ctx.body = {
       data: visible.map(presentDatabase),
-      policies: presentPolicies(user, visible),
+      policies: presentMergedPolicies(user, visible),
     };
   }
 );
@@ -90,7 +117,7 @@ router.post(
 
     ctx.body = {
       data: presentDatabase(database),
-      policies: presentPolicies(user, [database]),
+      policies: presentMergedPolicies(user, [database]),
     };
   }
 );
@@ -143,7 +170,7 @@ router.post(
 
     ctx.body = {
       data: presentDatabase(database),
-      policies: presentPolicies(user, [database]),
+      policies: presentMergedPolicies(user, [database]),
     };
   }
 );
@@ -232,7 +259,7 @@ router.post(
 
     ctx.body = {
       data: presentDatabase(database),
-      policies: presentPolicies(user, [database]),
+      policies: presentMergedPolicies(user, [database]),
     };
   }
 );

@@ -69,6 +69,10 @@ function DatabaseView({ database }: Props) {
   const { t } = useTranslation();
   const { databases, documents, dialogs } = useStores();
   const can = usePolicy(database);
+  // the anchor document shares the database's id, so a documents response
+  // may occupy the policy slot with document abilities that have no
+  // createRow — row creation delegates to updating the document anyway
+  const canCreateRow = can.createRow ?? can.update;
 
   const [persistedViewId, setPersistedViewId] = usePersistedState<
     string | undefined
@@ -766,7 +770,7 @@ function DatabaseView({ database }: Props) {
           rows={rows}
           properties={visibleProperties}
           groupByProperty={boardGroupByProperty}
-          onNewRow={can.createRow ? handleNewRow : undefined}
+          onNewRow={canCreateRow ? handleNewRow : undefined}
           newRowId={newRowId}
           onNewRowDone={handleNewRowDone}
           onDeleteRow={handleDeleteRow}
@@ -779,7 +783,7 @@ function DatabaseView({ database }: Props) {
           properties={visibleProperties}
           groupByProperty={listGroupProperty}
           hasFilter={!!filter}
-          onNewRow={can.createRow ? handleNewRowPlain : undefined}
+          onNewRow={canCreateRow ? handleNewRowPlain : undefined}
           newRowId={newRowId}
           onNewRowDone={handleNewRowDone}
           rowDepths={rowTree.depthById}
@@ -792,7 +796,7 @@ function DatabaseView({ database }: Props) {
           rows={rows}
           properties={visibleProperties}
           hasFilter={!!filter}
-          onNewRow={can.createRow ? handleNewRowPlain : undefined}
+          onNewRow={canCreateRow ? handleNewRowPlain : undefined}
           newRowId={newRowId}
           onNewRowDone={handleNewRowDone}
           onDeleteRow={handleDeleteRow}
@@ -808,7 +812,7 @@ function DatabaseView({ database }: Props) {
           sort={sort}
           onSetSort={handleSetSort}
           hasFilter={!!filter}
-          onNewRow={can.createRow ? handleNewRowPlain : undefined}
+          onNewRow={canCreateRow ? handleNewRowPlain : undefined}
           newRowId={newRowId}
           onNewRowDone={handleNewRowDone}
           schemaNames={schema.map((property) => property.name)}
@@ -827,7 +831,7 @@ function DatabaseView({ database }: Props) {
           parentRowIds={rowTree.parentIds}
           expandedRowIds={expandedRowIds}
           onToggleRowExpand={handleToggleRowExpand}
-          onAddSubItem={can.createRow ? handleNewSubItem : undefined}
+          onAddSubItem={canCreateRow ? handleNewSubItem : undefined}
           propertiesToggle={
             can.update && schema.length > 0 ? (
               <DatabaseViewProperties
