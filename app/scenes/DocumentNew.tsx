@@ -55,7 +55,9 @@ function DocumentNew() {
           }
         );
 
-        if (parentDocumentId) {
+        // rows live outside the sidebar document trees; they are listed
+        // through their database instead
+        if (parentDocumentId && !document.databaseId) {
           userMemberships
             .getByDocumentId(document.id)
             ?.addDocument(document, parentDocumentId);

@@ -1591,6 +1591,15 @@ router.post(
     });
     authorize(user, "move", document);
 
+    // a row lives in its database and follows the anchor document around; it
+    // cannot be moved on its own or it would fall out of the database's
+    // collection
+    if (document.databaseId) {
+      throw InvalidRequestError(
+        "Rows move with their database; move the database's document instead"
+      );
+    }
+
     if (parentDocumentId) {
       const parent = await Document.findByPk(parentDocumentId, {
         userId: user.id,
@@ -1848,12 +1857,34 @@ router.post(
     const { transaction } = ctx.state;
     const { user } = ctx.state.auth;
 
+    // creating under a database's document creates a row, whether or not the
+    // caller knew it was one: a child of the anchor document is a top-level
+    // row, and a child of a row is a sub-item of the same database. Without
+    // this, the ordinary "new nested document" paths would create documents
+    // that no view and no sidebar section ever shows.
+    let targetDatabaseId = databaseId ?? null;
+    if (!targetDatabaseId && parentDocumentId) {
+      const parent = await Document.findByPk(parentDocumentId, {
+        userId: user.id,
+        transaction,
+      });
+      if (parent?.databaseId) {
+        targetDatabaseId = parent.databaseId;
+      } else if (parent) {
+        const parentFacet = await Database.findByPk(parent.id, {
+          attributes: ["id"],
+          transaction,
+        });
+        targetDatabaseId = parentFacet?.id ?? null;
+      }
+    }
+
     // a row is created inside its database, and inherits the anchor
     // document's collection so it stays readable by exactly the same people
     let database: Database | null = null;
     let rowParentDocumentId = parentDocumentId;
-    if (databaseId) {
-      database = await Database.findByPk(databaseId, { transaction });
+    if (targetDatabaseId) {
+      database = await Database.findByPk(targetDatabaseId, { transaction });
       if (database) {
         // load the anchor document through the user scope so that membership
         // of a private collection is visible to the policy check
@@ -1867,13 +1898,13 @@ router.post(
       // a sub-item is a row nested under another row of the same database.
       // Parenting a row under the anchor document itself adds nothing over
       // the databaseId and is treated as no parent at all.
-      if (rowParentDocumentId === databaseId) {
+      if (rowParentDocumentId === targetDatabaseId) {
         rowParentDocumentId = null;
       } else if (rowParentDocumentId) {
         const parentRow = await Document.findByPk(rowParentDocumentId, {
           transaction,
         });
-        if (parentRow?.databaseId !== databaseId) {
+        if (parentRow?.databaseId !== targetDatabaseId) {
           throw ValidationError(
             "parentDocumentId must be a row of the same database"
           );
@@ -1912,7 +1943,9 @@ router.post(
       icon,
       color,
       createdAt,
-      publish,
+      // a draft row would be invisible — the row queries only return
+      // published documents — so rows are published straight away
+      publish: publish ?? (database ? true : undefined),
       index,
       collectionId: collection?.id,
       databaseId: database?.id,

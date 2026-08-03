@@ -848,6 +848,82 @@ describe("row sub-items", () => {
     expect(res.status).toEqual(400);
   });
 
+  it("should infer the database when nesting under a row without one", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const parent = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+    });
+
+    // this is what the ordinary "new nested document" paths send — no
+    // databaseId at all — and it must still produce a visible sub-item
+    const res = await server.post("/api/documents.create", user, {
+      body: {
+        title: "Sub-item",
+        parentDocumentId: parent.id,
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(body.data.databaseId).toEqual(database.id);
+    expect(body.data.parentDocumentId).toEqual(parent.id);
+    expect(body.data.publishedAt).toBeTruthy();
+  });
+
+  it("should create a row when nesting under the anchor document", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+
+    const res = await server.post("/api/documents.create", user, {
+      body: {
+        title: "Row",
+        parentDocumentId: database.id,
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(body.data.databaseId).toEqual(database.id);
+    expect(body.data.parentDocumentId).toBeNull();
+    expect(body.data.publishedAt).toBeTruthy();
+  });
+
+  it("should not move a row on its own", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const destination = await buildCollection({
+      teamId: team.id,
+      userId: user.id,
+    });
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const row = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+    });
+
+    const res = await server.post("/api/documents.move", user, {
+      body: { id: row.id, collectionId: destination.id },
+    });
+    expect(res.status).toEqual(400);
+  });
+
   it("should treat the anchor document as no parent at all", async () => {
     const { team, user, collection } = await buildEnabledTeam();
     const database = await buildDatabase({

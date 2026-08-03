@@ -387,8 +387,12 @@ const DocumentLinkInner = observer(function DocumentLinkInner({
         },
         { publish: true }
       );
-      collection?.addDocument(newDocument, node.id);
-      membership?.addDocument(newDocument, node.id);
+      // a document created under a database is a row and lives outside the
+      // collection's document structure
+      if (!newDocument.databaseId) {
+        collection?.addDocument(newDocument, node.id);
+        membership?.addDocument(newDocument, node.id);
+      }
       history.push({
         pathname: documentEditPath(newDocument),
         state: { sidebarContext },
