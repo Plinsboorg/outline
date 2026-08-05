@@ -4,14 +4,21 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import styled from "styled-components";
 import Icon from "@shared/components/Icon";
+import { colorPalette } from "@shared/constants";
 import { s } from "@shared/styles";
 import { errToString } from "@shared/utils/error";
 import { DocumentValidation } from "@shared/validations";
 import type Document from "~/models/Document";
 import Flex from "~/components/Flex";
 import Heading from "~/components/Heading";
+import { PopoverButton } from "~/components/IconPicker/components/PopoverButton";
 import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
+import lazyWithRetry from "~/utils/lazyWithRetry";
+
+const IconPicker = lazyWithRetry(() => import("~/components/IconPicker"));
+
+const iconSize = 32;
 
 type Props = {
   /** The database's anchor document whose title to show. */
@@ -20,8 +27,8 @@ type Props = {
 
 /**
  * The compact heading of a database's page: the document's icon and title
- * with click-to-rename. It stands in for the document editor — a database
- * page shows its views rather than a text body.
+ * with click-to-rename and an icon picker. It stands in for the document
+ * editor — a database page shows its views rather than a text body.
  */
 function DatabaseDocumentTitle({ document }: Props) {
   const { t } = useTranslation();
@@ -48,6 +55,21 @@ function DatabaseDocumentTitle({ document }: Props) {
     }
   }, [documents, document, value]);
 
+  const handleChangeIcon = React.useCallback(
+    (icon: string | null, color: string | null) => {
+      if (
+        icon === (document.icon ?? null) &&
+        color === (document.color ?? null)
+      ) {
+        return;
+      }
+      void documents
+        .update({ id: document.id, icon, color })
+        .catch((error) => toast.error(errToString(error)));
+    },
+    [documents, document]
+  );
+
   const handleKeyDown = React.useCallback(
     (ev: React.KeyboardEvent<HTMLInputElement>) => {
       if (ev.nativeEvent.isComposing) {
@@ -66,15 +88,33 @@ function DatabaseDocumentTitle({ document }: Props) {
     [handleCommit, document.title]
   );
 
+  const iconColor = document.color ?? colorPalette[0];
+  const staticIcon = document.icon ? (
+    <Icon
+      value={document.icon}
+      color={iconColor}
+      size={iconSize}
+      initial={document.initial}
+    />
+  ) : null;
+
   return (
-    <TitleRow align="center" gap={8}>
-      {document.icon && (
-        <Icon
-          value={document.icon}
-          color={document.color ?? undefined}
-          size={32}
-          initial={document.initial}
-        />
+    <TitleRow align="center" gap={8} $hasIcon={!!document.icon}>
+      {can.update ? (
+        <React.Suspense fallback={staticIcon}>
+          <IconPicker
+            icon={document.icon ?? null}
+            color={iconColor}
+            initial={document.initial}
+            size={iconSize}
+            popoverPosition="bottom-start"
+            onChange={handleChangeIcon}
+            allowDelete
+            borderOnHover
+          />
+        </React.Suspense>
+      ) : (
+        staticIcon
       )}
       <FullWidthHeading>
         {isEditing ? (
@@ -102,8 +142,21 @@ function DatabaseDocumentTitle({ document }: Props) {
   );
 }
 
-const TitleRow = styled(Flex)`
+// The picker's trigger doubles as the icon, so it stays visible whenever the
+// database has one and fades in on hover when it doesn't.
+const TitleRow = styled(Flex)<{ $hasIcon: boolean }>`
   margin-top: 1em;
+
+  ${PopoverButton} {
+    opacity: ${(props) => (props.$hasIcon ? 1 : 0)};
+  }
+
+  &:hover,
+  &:focus-within {
+    ${PopoverButton} {
+      opacity: 1;
+    }
+  }
 `;
 
 const FullWidthHeading = styled(Heading)`
