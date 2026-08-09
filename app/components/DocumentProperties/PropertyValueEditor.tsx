@@ -176,12 +176,11 @@ function PropertyValueEditor({
         );
       }
       return (
-        <NudeInput
-          type="url"
-          defaultValue={url}
-          placeholder={t("Empty")}
-          onBlur={handleTextCommit}
+        <UrlCellEditor
+          url={url}
+          onCommit={handleTextCommit}
           onKeyDown={handleKeyDown}
+          t={t}
         />
       );
     }
@@ -401,6 +400,102 @@ function ImageValueEditor({
   );
 }
 
+/**
+ * URL cell editor for table view: shows URL as a clickable link with underline styling.
+ * Clicking on the text opens the link. Clicking near the text or double-clicking enters edit mode.
+ */
+function UrlCellEditor({
+  url,
+  onCommit,
+  onKeyDown,
+  t,
+}: {
+  url: string;
+  onCommit: (ev: React.FocusEvent<HTMLInputElement>) => void;
+  onKeyDown: (ev: React.KeyboardEvent<HTMLInputElement>) => void;
+  t: ReturnType<typeof useTranslation>["t"];
+}): React.ReactElement {
+  const [isEditing, setIsEditing] = React.useState(false);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const handleLinkClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    // Allow default link behavior (open in new tab)
+    // But we prevent default to handle it ourselves for better UX
+    event.preventDefault();
+    if (url) {
+      window.open(sanitizeUrl(url), "_blank", "noopener,noreferrer");
+    }
+  };
+
+  const handleCellClick = (event: React.MouseEvent) => {
+    // If clicking directly on the link text, open it
+    if ((event.target as HTMLElement).tagName === "A") {
+      return;
+    }
+    // Otherwise, enter edit mode
+    setIsEditing(true);
+  };
+
+  const handleInputBlur = (ev: React.FocusEvent<HTMLInputElement>) => {
+    onCommit(ev);
+    setIsEditing(false);
+  };
+
+  const handleInputKeyDown = (ev: React.KeyboardEvent<HTMLInputElement>) => {
+    if (ev.key === "Escape") {
+      setIsEditing(false);
+      return;
+    }
+    onKeyDown(ev);
+  };
+
+  const handleDoubleClick = () => {
+    setIsEditing(true);
+  };
+
+  if (isEditing) {
+    return (
+      <NudeInput
+        ref={inputRef}
+        type="url"
+        defaultValue={url}
+        placeholder={t("Empty")}
+        onBlur={handleInputBlur}
+        onKeyDown={handleInputKeyDown}
+      />
+    );
+  }
+
+  if (!url) {
+    return <Placeholder>–</Placeholder>;
+  }
+
+  return (
+    <UrlLinkCell
+      onClick={handleCellClick}
+      onDoubleClick={handleDoubleClick}
+    >
+      <UrlLink
+        href={sanitizeUrl(url)}
+        target="_blank"
+        rel="noreferrer nofollow"
+        onClick={handleLinkClick}
+        role="button"
+        tabIndex={0}
+      >
+        {url}
+      </UrlLink>
+    </UrlLinkCell>
+  );
+}
+
 const RelationValueEditor = observer(function RelationValueEditor_({
   property,
   value,
@@ -578,6 +673,17 @@ const UrlLink = styled.a`
   color: ${s("accent")};
   padding: 4px 6px;
   overflow-wrap: anywhere;
+  text-decoration: underline;
+`;
+
+const UrlLinkCell = styled.div`
+  cursor: text;
+  padding: 4px 6px;
+  border-radius: 4px;
+  
+  &:hover {
+    background: ${s("backgroundSecondary")};
+  }
 `;
 
 const ChipList = styled.div`
