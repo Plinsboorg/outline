@@ -4,12 +4,16 @@ import type { NavigationNode } from "@shared/types";
 
 /**
  * Computes the set of node IDs along the path from any node in `roots` down
- * to a node with `targetId`, inclusive of both endpoints. Returns an empty
+ * to a node with `targetId`. The target itself is included only when the tree
+ * knows of children to reveal beneath it — expanding a node with none shows
+ * nothing, and a database's rows are not part of the structure, so opening one
+ * would otherwise empty its whole table into the sidebar. Returns an empty
  * array when no path exists.
  *
  * @param roots the top-level navigation nodes to search through.
  * @param targetId the id of the target document.
- * @returns array of ancestor IDs (inclusive of the target).
+ * @returns array of ancestor IDs (inclusive of the target when it has
+ * children).
  */
 function computeAncestorPath(
   roots: NavigationNode[],
@@ -22,6 +26,9 @@ function computeAncestorPath(
       stack.push(node.id);
       if (node.id === targetId) {
         found = true;
+        if (!node.children.length) {
+          stack.pop();
+        }
         return true;
       }
       if (node.children.length && search(node.children)) {

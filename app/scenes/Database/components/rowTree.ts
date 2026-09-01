@@ -1,4 +1,33 @@
+import fractionalIndex from "fractional-index";
+import { orderBy } from "es-toolkit/compat";
+
 type RowLike = { id: string; parentDocumentId?: string | null };
+
+/** A row carrying the fields its manual arrangement is derived from. */
+type OrderedRowLike = RowLike & {
+  databaseIndex?: string | null;
+  createdAt?: string;
+};
+
+/**
+ * Sorts above every character a fractional index can hold, so rows that have
+ * never been arranged by hand sort last rather than first.
+ */
+const UNORDERED = "\uffff";
+
+/** The outcome of planning a row move; only "move" has anything to apply. */
+export type RowMovePlan<T> =
+  | {
+      status: "move";
+      /** The rows in their new order. */
+      rows: T[];
+      /** The parent the moved row now sits under; null means top level. */
+      parentDocumentId: string | null;
+      /** The fractional index placing the row among its new siblings. */
+      index: string;
+    }
+  | { status: "none" }
+  | { status: "cycle" };
 
 export type RowTree<T extends RowLike> = {
   /** The rows to display, in order: children follow their expanded parent. */
@@ -66,5 +95,109 @@ export function buildRowTree<T extends RowLike>(
     depthById,
     parentIds: new Set(childrenByParent.keys()),
     hasNesting: childrenByParent.size > 0,
+  };
+}
+
+/**
+ * Orders rows by the arrangement made by hand — the one the server lists a
+ * database's rows in, and the one both the table and the sidebar show when no
+ * sort is applied. Fractional indexes compare byte for byte, so the order here
+ * matches the order a new index is computed against.
+ *
+ * @param rows the rows to order.
+ * @returns a new array in manual order.
+ */
+export function orderRowsByIndex<T extends OrderedRowLike>(rows: T[]): T[] {
+  return orderBy(
+    rows,
+    [(row) => row.databaseIndex ?? UNORDERED, "createdAt"],
+    ["asc", "asc"]
+  );
+}
+
+/**
+ * Works out where a row lands when it is dropped beside another one: it
+ * becomes that row's sibling, so a single drop can reorder within a level,
+ * nest a row under a different parent, or pull a sub-item back out to the top
+ * level. Shared by the table's row drag and the sidebar's, so both arrive at
+ * the same arrangement.
+ *
+ * @param rows every loaded row, in manual order.
+ * @param documentId the row being moved.
+ * @param overDocumentId the row it was dropped beside.
+ * @param placement whether the moved row takes the target's place, as when
+ * dragging within the table, or follows it, as when dropping on the cursor
+ * beneath a sidebar row.
+ * @returns the move to apply, or why there is nothing to apply.
+ * @throws when no fractional index exists between the new neighbours.
+ */
+export function planRowMove<T extends OrderedRowLike>(
+  rows: T[],
+  documentId: string,
+  overDocumentId: string,
+  placement: "over" | "after" = "over"
+): RowMovePlan<T> {
+  const from = rows.findIndex((row) => row.id === documentId);
+  const over = rows.findIndex((row) => row.id === overDocumentId);
+  if (from === -1 || over === -1 || from === over) {
+    return { status: "none" };
+  }
+  // taking the target's place lands after it when the row comes from above and
+  // before it when it comes from below; following the target is always after
+  const to = placement === "after" && from > over ? over + 1 : over;
+
+  const ids = new Set(rows.map((row) => row.id));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  // a row whose parent is not loaded is shown, and treated, as top level
+  const effectiveParent = (row: T): string | null =>
+    row.parentDocumentId && ids.has(row.parentDocumentId)
+      ? row.parentDocumentId
+      : null;
+  const targetParentId = effectiveParent(
+    placement === "after" ? rows[over] : rows[to]
+  );
+
+  // staying put is only a no-op while the row keeps its parent — the same
+  // position under a different one is a change of nesting
+  if (to === from && effectiveParent(rows[from]) === targetParentId) {
+    return { status: "none" };
+  }
+
+  // nesting a row inside its own subtree would orphan the whole branch
+  let ancestorId = targetParentId;
+  while (ancestorId) {
+    if (ancestorId === documentId) {
+      return { status: "cycle" };
+    }
+    const ancestor = byId.get(ancestorId);
+    ancestorId = ancestor ? effectiveParent(ancestor) : null;
+  }
+
+  const reordered = [...rows];
+  reordered.splice(to, 0, ...reordered.splice(from, 1));
+
+  // the nearest neighbours in the same sibling group decide the new index; a
+  // neighbour without one has never been ordered and sorts last regardless, so
+  // an unbounded index on that side is what we want
+  let before: string | null = null;
+  for (let i = to - 1; i >= 0; i--) {
+    if (effectiveParent(reordered[i]) === targetParentId) {
+      before = reordered[i].databaseIndex ?? null;
+      break;
+    }
+  }
+  let after: string | null = null;
+  for (let i = to + 1; i < reordered.length; i++) {
+    if (effectiveParent(reordered[i]) === targetParentId) {
+      after = reordered[i].databaseIndex ?? null;
+      break;
+    }
+  }
+
+  return {
+    status: "move",
+    rows: reordered,
+    parentDocumentId: targetParentId,
+    index: fractionalIndex(before, after),
   };
 }

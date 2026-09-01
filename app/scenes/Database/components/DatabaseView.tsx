@@ -1,5 +1,4 @@
 import { arrayMove } from "@dnd-kit/sortable";
-import fractionalIndex from "fractional-index";
 import { observer } from "mobx-react";
 import { SettingsIcon, SortManualIcon } from "outline-icons";
 import * as React from "react";
@@ -36,6 +35,7 @@ import { InputSelect } from "~/components/InputSelect";
 import PlaceholderList from "~/components/List/Placeholder";
 import NudeButton from "~/components/NudeButton";
 import Tooltip from "~/components/Tooltip";
+import { useComputed } from "~/hooks/useComputed";
 import usePersistedState from "~/hooks/usePersistedState";
 import usePolicy from "~/hooks/usePolicy";
 import useDeleteRow from "~/hooks/useDeleteRow";
@@ -47,7 +47,7 @@ import DatabaseTable from "./DatabaseTable";
 import DatabaseTableFilter from "./DatabaseTableFilter";
 import DatabaseViewProperties from "./DatabaseViewProperties";
 import DatabaseViewTabs from "./DatabaseViewTabs";
-import { buildRowTree } from "./rowTree";
+import { buildRowTree, orderRowsByIndex, planRowMove } from "./rowTree";
 
 type Props = {
   /** The database to render. */
@@ -280,11 +280,20 @@ function DatabaseView({ database }: Props) {
     setNewRowId(undefined);
   }, []);
 
+  // an unsorted view shows the manual arrangement, read from the rows' own
+  // indexes rather than the order they arrived in — so a row moved in the
+  // sidebar takes its new place here without a refetch, and vice versa. A
+  // sorted view keeps the order the server sorted it into.
+  const orderedRows = useComputed(
+    () => (sort ? (rows ?? []) : orderRowsByIndex(rows ?? [])),
+    [rows, sort]
+  );
+
   // sub-items are rows parented under another row of the same database;
   // table and list views show them indented under their expanded parent
   const rowTree = React.useMemo(
-    () => buildRowTree(rows ?? [], expandedRowIds),
-    [rows, expandedRowIds]
+    () => buildRowTree(orderedRows, expandedRowIds),
+    [orderedRows, expandedRowIds]
   );
 
   const handleToggleRowExpand = React.useCallback((rowId: string) => {
@@ -453,78 +462,39 @@ function DatabaseView({ database }: Props) {
     [schema, activeView, updateActiveView]
   );
 
+  // dropping next to a row makes the moved row its sibling, so dragging can
+  // also pull a sub-item out to the top level or nest it elsewhere. The move
+  // is planned by the same helper the sidebar uses, and applied by writing the
+  // row's index — the displayed order follows from that, here and there.
   const handleMoveRow = React.useCallback(
     (documentId: string, overDocumentId: string) => {
-      if (!rows) {
+      const row = orderedRows.find((item) => item.id === documentId);
+      if (!row) {
         return;
       }
-      const from = rows.findIndex((row) => row.id === documentId);
-      const to = rows.findIndex((row) => row.id === overDocumentId);
-      if (from === -1 || to === -1 || from === to) {
-        return;
-      }
-
-      // dropping next to a row makes the moved row its sibling, so dragging
-      // can also pull a sub-item out to the top level or nest it elsewhere
-      const ids = new Set(rows.map((row) => row.id));
-      const byId = new Map(rows.map((row) => [row.id, row]));
-      const effectiveParent = (row: Document): string | null =>
-        row.parentDocumentId && ids.has(row.parentDocumentId)
-          ? row.parentDocumentId
-          : null;
-      const targetParentId = effectiveParent(rows[to]);
-
-      // nesting a row inside its own subtree would orphan the whole branch
-      let ancestorId = targetParentId;
-      while (ancestorId) {
-        if (ancestorId === documentId) {
-          toast.error(t("A row cannot be nested under its own sub-item"));
-          return;
-        }
-        const ancestor = byId.get(ancestorId);
-        ancestorId = ancestor ? effectiveParent(ancestor) : null;
-      }
-
-      const previousRows = rows;
-      const reordered = arrayMove(rows, from, to);
-      // the nearest neighbours in the same sibling group decide the new
-      // index; a neighbour without one has never been ordered and sorts last
-      // regardless, so an unbounded index on that side is what we want
-      let before: string | null = null;
-      for (let i = to - 1; i >= 0; i--) {
-        if (effectiveParent(reordered[i]) === targetParentId) {
-          before = reordered[i].databaseIndex ?? null;
-          break;
-        }
-      }
-      let after: string | null = null;
-      for (let i = to + 1; i < reordered.length; i++) {
-        if (effectiveParent(reordered[i]) === targetParentId) {
-          after = reordered[i].databaseIndex ?? null;
-          break;
-        }
-      }
-
-      let index: string;
+      let plan;
       try {
-        index = fractionalIndex(before, after);
+        plan = planRowMove(orderedRows, documentId, overDocumentId);
       } catch (error) {
         toast.error(errToString(error));
         return;
       }
-
-      setRows(reordered);
-      if (targetParentId) {
-        setExpandedRowIds((current) => new Set(current).add(targetParentId));
+      if (plan.status === "cycle") {
+        toast.error(t("A row cannot be nested under its own sub-item"));
+        return;
+      }
+      if (plan.status === "none") {
+        return;
+      }
+      const { parentDocumentId } = plan;
+      if (parentDocumentId) {
+        setExpandedRowIds((current) => new Set(current).add(parentDocumentId));
       }
       void databases
-        .moveRow(database, reordered[to], index, targetParentId)
-        .catch((error) => {
-          toast.error(errToString(error));
-          setRows(previousRows);
-        });
+        .moveRow(database, row, plan.index, parentDocumentId)
+        .catch((error) => toast.error(errToString(error)));
     },
-    [rows, databases, database, t]
+    [orderedRows, databases, database, t]
   );
 
   const handleResizeColumn = React.useCallback(
@@ -780,7 +750,7 @@ function DatabaseView({ database }: Props) {
 
       {viewType === DataViewType.Board && boardGroupByProperty ? (
         <DatabaseBoard
-          rows={rows}
+          rows={orderedRows}
           properties={visibleProperties}
           groupByProperty={boardGroupByProperty}
           onNewRow={canCreateRow ? handleNewRow : undefined}
@@ -792,7 +762,7 @@ function DatabaseView({ database }: Props) {
         <DatabaseList
           // grouping splits rows apart, so sub-items are shown flat there —
           // only the ungrouped list nests them under their parent
-          rows={listGroupProperty ? rows : rowTree.visibleRows}
+          rows={listGroupProperty ? orderedRows : rowTree.visibleRows}
           properties={visibleProperties}
           groupByProperty={listGroupProperty}
           hasFilter={!!filter}
@@ -806,7 +776,7 @@ function DatabaseView({ database }: Props) {
         />
       ) : viewType === DataViewType.Gallery ? (
         <DatabaseGallery
-          rows={rows}
+          rows={orderedRows}
           properties={visibleProperties}
           hasFilter={!!filter}
           onNewRow={canCreateRow ? handleNewRowPlain : undefined}

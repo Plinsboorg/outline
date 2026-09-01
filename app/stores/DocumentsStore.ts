@@ -17,6 +17,7 @@ import {
 import { subtractDate } from "@shared/utils/date";
 import { bytesToHumanReadable } from "@shared/utils/files";
 import naturalSort from "@shared/utils/naturalSort";
+import { orderRowsByIndex } from "~/scenes/Database/components/rowTree";
 import type RootStore from "~/stores/RootStore";
 import Store from "~/stores/base/Store";
 import Document from "~/models/Document";
@@ -161,20 +162,19 @@ export default class DocumentsStore extends Store<Document> {
   }
 
   /**
-   * Returns the loaded rows of a database, oldest first.
+   * Returns the loaded rows of a database in their manual order — the same
+   * order the server lists them in, and the one an unsorted view shows.
    *
    * @param databaseId the database to filter by.
    * @returns the database's rows currently loaded in the store.
    */
   inDatabase(databaseId: string): Document[] {
-    return orderBy(
+    return orderRowsByIndex(
       filter(
         this.all,
         (document) =>
           document.databaseId === databaseId && !!document.publishedAt
-      ),
-      "createdAt",
-      "asc"
+      )
     );
   }
 

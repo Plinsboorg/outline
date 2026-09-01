@@ -16,7 +16,9 @@ import { useDocumentMenuAction } from "~/hooks/useDocumentMenuAction";
 import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
 import { documentPath } from "~/utils/routeHelpers";
+import { useDragDocument, useDropToReorderRow } from "../hooks/useDragAndDrop";
 import DocumentRow from "./DocumentRow";
+import DropCursor from "./DropCursor";
 import { useSidebarContext } from "./SidebarContext";
 import SidebarLink from "./SidebarLink";
 
@@ -112,9 +114,21 @@ const DatabaseRowLink = observer(function DatabaseRowLink_({
   const history = useHistory();
   const sidebarContext = useSidebarContext();
   const can = usePolicy(row);
+  const canReorder = usePolicy(database).update;
   const [expanded, setExpanded] = React.useState(false);
+  const [isEditing, setIsEditing] = React.useState(false);
   const [menuOpen, handleMenuOpen, handleMenuClose] = useBoolean();
   const editableTitleRef = React.useRef<RefHandle>(null);
+
+  // rows drag like any sidebar document, but land through the database's own
+  // ordering rather than the collection's document structure
+  const [{ isDragging }, drag] = useDragDocument(
+    row.asNavigationNode,
+    depth,
+    row,
+    isEditing
+  );
+  const [{ isOverReorder }, dropToReorder] = useDropToReorderRow(database, row);
 
   const subItems = allRows.filter(
     (item) => item.parentDocumentId === row.id && item.id !== row.id
@@ -201,6 +215,14 @@ const DatabaseRowLink = observer(function DatabaseRowLink_({
         labelText={row.titleWithDefault}
         onTitleChange={handleTitleChange}
         editableTitleRef={editableTitleRef}
+        onEditingChange={setIsEditing}
+        dragRef={drag}
+        isDragging={isDragging}
+        cursorAfter={
+          canReorder ? (
+            <DropCursor isActiveDrop={isOverReorder} innerRef={dropToReorder} />
+          ) : undefined
+        }
         expanded={expanded}
         hasChildren={subItems.length > 0}
         onDisclosureClick={handleDisclosureClick}

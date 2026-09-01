@@ -9,11 +9,14 @@ import { errToString } from "@shared/utils/error";
 import Icon from "@shared/components/Icon";
 import type { NavigationNode } from "@shared/types";
 import type Collection from "~/models/Collection";
+import type Database from "~/models/Database";
 import type Document from "~/models/Document";
 import type GroupMembership from "~/models/GroupMembership";
 import type Star from "~/models/Star";
+import type DocumentsStore from "~/stores/DocumentsStore";
 import UserMembership from "~/models/UserMembership";
 import ConfirmMoveDialog from "~/components/ConfirmMoveDialog";
+import { planRowMove } from "~/scenes/Database/components/rowTree";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
@@ -30,6 +33,20 @@ export type DragObject = NavigationNode & {
    */
   constrainToSidebar?: boolean;
 };
+
+/**
+ * Whether a dragged document is a database row. Rows are arranged inside their
+ * database by index, so the drop targets that move documents through the
+ * collection's structure have to turn them away — `useDropToReorderRow` is the
+ * one that takes them.
+ *
+ * @param documents the documents store.
+ * @param id the id of the dragged document.
+ * @returns true when the document is a row.
+ */
+function isRow(documents: DocumentsStore, id: string): boolean {
+  return !!documents.get(id)?.databaseId;
+}
 
 function useHover(
   elementRef: React.RefObject<HTMLDivElement>,
@@ -281,7 +298,10 @@ export function useDropToChangeCollection(
         }
       }
     },
-    canDrop: (item) => can.createDocument && !!policies.abilities(item.id).move,
+    canDrop: (item) =>
+      can.createDocument &&
+      !!policies.abilities(item.id).move &&
+      !isRow(documents, item.id),
     hover: (_, monitor) => {
       if (
         collection.hasDocuments &&
@@ -373,7 +393,12 @@ export function useDropToReparentDocument(
       }
     },
     canDrop: (item) => {
-      if (!node || item.id === node.id || !policies.abilities(item.id).move) {
+      if (
+        !node ||
+        item.id === node.id ||
+        !policies.abilities(item.id).move ||
+        isRow(documents, item.id)
+      ) {
         return false;
       }
 
@@ -406,6 +431,63 @@ export function useDropToReparentDocument(
 }
 
 /**
+ * Hook allowing a database row to be dropped below another row in the sidebar,
+ * which arranges it as that row's sibling. Rows are ordered by their own
+ * fractional index rather than by the collection's document structure, so they
+ * move through databases.move_row instead of documents.move — the same call
+ * the table's row drag makes, planned by the same helper.
+ *
+ * @param database the database both rows belong to.
+ * @param row the row the cursor sits beneath.
+ * @returns the react-dnd drop target for the cursor.
+ */
+export function useDropToReorderRow(database: Database, row: Document) {
+  const { t } = useTranslation();
+  const { documents, databases } = useStores();
+
+  return useDrop<DragObject, Promise<void>, { isOverReorder: boolean }>({
+    accept: "document",
+    canDrop: (item: DragObject) =>
+      item.id !== row.id && documents.get(item.id)?.databaseId === database.id,
+    drop: async (item, monitor) => {
+      if (monitor.didDrop()) {
+        return;
+      }
+      const dragged = documents.get(item.id);
+      if (!dragged) {
+        return;
+      }
+      try {
+        const plan = planRowMove(
+          documents.inDatabase(database.id),
+          item.id,
+          row.id,
+          "after"
+        );
+        if (plan.status === "cycle") {
+          toast.error(t("A row cannot be nested under its own sub-item"));
+          return;
+        }
+        if (plan.status === "none") {
+          return;
+        }
+        await databases.moveRow(
+          database,
+          dragged,
+          plan.index,
+          plan.parentDocumentId
+        );
+      } catch (err) {
+        toast.error(errToString(err));
+      }
+    },
+    collect: (monitor) => ({
+      isOverReorder: !!monitor.isOver({ shallow: true }) && monitor.canDrop(),
+    }),
+  });
+}
+
+/**
  * Hook for shared logic that allows dropping documents to reorder
  *
  * @param node The NavigationNode model to drop.
@@ -432,7 +514,11 @@ export function useDropToReorderDocument(
   return useDrop<DragObject, Promise<void>, { isOverReorder: boolean }>({
     accept: "document",
     canDrop: (item: DragObject) => {
-      if (item.id === node.id || (document && !document.isActive)) {
+      if (
+        item.id === node.id ||
+        (document && !document.isActive) ||
+        isRow(documents, item.id)
+      ) {
         return false;
       }
       return !!policies.abilities(item.id).move;
