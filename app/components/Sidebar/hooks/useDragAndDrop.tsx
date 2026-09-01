@@ -17,7 +17,7 @@ import type DocumentsStore from "~/stores/DocumentsStore";
 import UserMembership from "~/models/UserMembership";
 import ConfirmationDialog from "~/components/ConfirmationDialog";
 import ConfirmMoveDialog from "~/components/ConfirmMoveDialog";
-import { planRowMove } from "~/scenes/Database/components/rowTree";
+import { planRowMove } from "@shared/utils/rowTree";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";

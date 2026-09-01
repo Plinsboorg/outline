@@ -47,7 +47,11 @@ import DatabaseTable from "./DatabaseTable";
 import DatabaseTableFilter from "./DatabaseTableFilter";
 import DatabaseViewProperties from "./DatabaseViewProperties";
 import DatabaseViewTabs from "./DatabaseViewTabs";
-import { buildRowTree, orderRowsByIndex, planRowMove } from "./rowTree";
+import {
+  buildRowTree,
+  orderRowsByIndex,
+  planRowMove,
+} from "@shared/utils/rowTree";
 
 type Props = {
   /** The database to render. */

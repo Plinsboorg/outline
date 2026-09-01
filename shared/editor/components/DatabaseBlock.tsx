@@ -1,4 +1,5 @@
 import { observer } from "mobx-react";
+import { CollapsedIcon } from "outline-icons";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -12,6 +13,8 @@ import {
   isGroupableProperty,
   visiblePropertiesForView,
 } from "../../utils/properties";
+import type { RowTree } from "../../utils/rowTree";
+import { buildRowTree } from "../../utils/rowTree";
 import useIsMounted from "../../hooks/useIsMounted";
 import useStores from "../../hooks/useStores";
 import type { ComponentProps } from "../types";
@@ -30,8 +33,12 @@ type RowModel = {
   id: string;
   path: string;
   titleWithDefault: string;
+  parentDocumentId?: string | null;
   propertyValue: (id: string) => PropertyValue | undefined;
 };
+
+/** How far one level of sub-item nesting indents a row, in pixels. */
+const INDENT_WIDTH = 20;
 
 /**
  * Renders the inline database block: a read-only live view over the rows of a
@@ -51,14 +58,30 @@ function DatabaseBlock({
   const { databaseId, viewId } = node.attrs;
 
   const [rowIds, setRowIds] = React.useState<string[]>();
+  const [expandedRowIds, setExpandedRowIds] = React.useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const database = databaseId ? databases.get(databaseId) : undefined;
   const schema: Property[] = database?.dataSchema ?? [];
   const views: DataView[] = database?.views ?? [];
-  const view = viewId
-    ? views.find((item: DataView) => item.id === viewId)
-    : undefined;
+  // the block reads through one of the database's saved views — the named one,
+  // or the first saved view when the block predates it. A database with no
+  // saved views at all falls back to a table over every property.
+  const view: DataView | undefined = database?.resolveView(viewId);
   const viewType = view?.type ?? DataViewType.Table;
   const visibleSchema = visiblePropertiesForView(schema, view);
+
+  const handleToggleRowExpand = React.useCallback((rowId: string) => {
+    setExpandedRowIds((current) => {
+      const next = new Set(current);
+      if (next.has(rowId)) {
+        next.delete(rowId);
+      } else {
+        next.add(rowId);
+      }
+      return next;
+    });
+  }, []);
 
   React.useEffect(() => {
     if (!databaseId) {
@@ -70,9 +93,11 @@ function DatabaseBlock({
         if (!databases.get(databaseId)) {
           await databases.fetch(databaseId);
         }
+        const resolved = databases.get(databaseId)?.resolveView(viewId);
         const { rows: results } = await documents.fetchInDatabase({
           databaseId,
-          filter: databases.get(databaseId)?.resolveView(viewId)?.filter,
+          filter: resolved?.filter,
+          propertySorts: resolved?.sorts?.length ? resolved.sorts : undefined,
           limit: ROW_LIMIT,
         });
         if (isMounted()) {
@@ -126,6 +151,9 @@ function DatabaseBlock({
     .map((id: string) => documents.get(id))
     .filter(Boolean);
   const isEmpty = rowIds !== undefined && rows.length === 0;
+  // sub-items are rows parented under another row; table and list views show
+  // them indented under their parent, once it is expanded
+  const rowTree = buildRowTree(rows, expandedRowIds);
 
   return (
     <Container contentEditable={false}>
@@ -133,13 +161,6 @@ function DatabaseBlock({
         <Title to={database.path}>{database.name}</Title>
         {isEditable && views.length > 0 && (
           <ViewPicker>
-            <PickerButton
-              type="button"
-              onClick={() => onChangeView(null)}
-              $active={!view}
-            >
-              {t("Table")}
-            </PickerButton>
             {views.map((item: DataView) => (
               <PickerButton
                 key={item.id}
@@ -165,7 +186,10 @@ function DatabaseBlock({
         />
       ) : viewType === DataViewType.List ? (
         <BlockList
-          rows={rows}
+          rows={rowTree.visibleRows}
+          rowTree={rowTree}
+          expandedRowIds={expandedRowIds}
+          onToggleRowExpand={handleToggleRowExpand}
           schema={visibleSchema}
           isEmpty={isEmpty}
           emptyLabel={t("No documents yet")}
@@ -179,7 +203,10 @@ function DatabaseBlock({
         />
       ) : (
         <BlockTable
-          rows={rows}
+          rows={rowTree.visibleRows}
+          rowTree={rowTree}
+          expandedRowIds={expandedRowIds}
+          onToggleRowExpand={handleToggleRowExpand}
           schema={visibleSchema}
           isEmpty={isEmpty}
           emptyLabel={t("No documents yet")}
@@ -190,14 +217,59 @@ function DatabaseBlock({
   );
 }
 
+/**
+ * The arrow that opens and closes a row's sub-items. Rows without sub-items
+ * keep an empty slot of the same width, so titles stay aligned down the
+ * column, and nothing is rendered at all when no row in view nests.
+ */
+function Disclosure({
+  row,
+  rowTree,
+  expandedRowIds,
+  onToggleRowExpand,
+}: {
+  row: RowModel;
+  rowTree: RowTree<RowModel>;
+  expandedRowIds: ReadonlySet<string>;
+  onToggleRowExpand: (rowId: string) => void;
+}) {
+  const { t } = useTranslation();
+
+  if (!rowTree.hasNesting) {
+    return null;
+  }
+  if (!rowTree.parentIds.has(row.id)) {
+    return <DisclosureSpacer />;
+  }
+
+  const isExpanded = expandedRowIds.has(row.id);
+  return (
+    <DisclosureButton
+      type="button"
+      onClick={() => onToggleRowExpand(row.id)}
+      aria-expanded={isExpanded}
+      aria-label={isExpanded ? t("Collapse") : t("Expand")}
+      $expanded={isExpanded}
+    >
+      <CollapsedIcon size={18} />
+    </DisclosureButton>
+  );
+}
+
 const BlockTable = observer(function BlockTable_({
   rows,
+  rowTree,
+  expandedRowIds,
+  onToggleRowExpand,
   schema,
   isEmpty,
   emptyLabel,
   titleLabel,
 }: {
   rows: RowModel[];
+  rowTree: RowTree<RowModel>;
+  expandedRowIds: ReadonlySet<string>;
+  onToggleRowExpand: (rowId: string) => void;
   schema: Property[];
   isEmpty: boolean;
   emptyLabel: string;
@@ -218,7 +290,20 @@ const BlockTable = observer(function BlockTable_({
           {rows.map((doc) => (
             <tr key={doc.id}>
               <Cell>
-                <RowLink to={doc.path}>{doc.titleWithDefault}</RowLink>
+                <TitleContent
+                  style={{
+                    paddingLeft:
+                      (rowTree.depthById.get(doc.id) ?? 0) * INDENT_WIDTH,
+                  }}
+                >
+                  <Disclosure
+                    row={doc}
+                    rowTree={rowTree}
+                    expandedRowIds={expandedRowIds}
+                    onToggleRowExpand={onToggleRowExpand}
+                  />
+                  <RowLink to={doc.path}>{doc.titleWithDefault}</RowLink>
+                </TitleContent>
               </Cell>
               {schema.map((property) => (
                 <Cell key={property.id}>
@@ -318,11 +403,17 @@ const BlockBoard = observer(function BlockBoard_({
 
 const BlockList = observer(function BlockList_({
   rows,
+  rowTree,
+  expandedRowIds,
+  onToggleRowExpand,
   schema,
   isEmpty,
   emptyLabel,
 }: {
   rows: RowModel[];
+  rowTree: RowTree<RowModel>;
+  expandedRowIds: ReadonlySet<string>;
+  onToggleRowExpand: (rowId: string) => void;
   schema: Property[];
   isEmpty: boolean;
   emptyLabel: string;
@@ -333,7 +424,19 @@ const BlockList = observer(function BlockList_({
   return (
     <div>
       {rows.map((doc) => (
-        <ListRow key={doc.id}>
+        <ListRow
+          key={doc.id}
+          style={{
+            paddingLeft:
+              10 + (rowTree.depthById.get(doc.id) ?? 0) * INDENT_WIDTH,
+          }}
+        >
+          <Disclosure
+            row={doc}
+            rowTree={rowTree}
+            expandedRowIds={expandedRowIds}
+            onToggleRowExpand={onToggleRowExpand}
+          />
           <RowLink to={doc.path}>{doc.titleWithDefault}</RowLink>
           <ListValues>
             {schema.map((property) => {
@@ -453,6 +556,39 @@ const Cell = styled.td`
 
   tr:not(:last-child) & {
     border-bottom: 1px solid ${s("divider")};
+  }
+`;
+
+const TitleContent = styled.div`
+  display: flex;
+  align-items: center;
+`;
+
+const DisclosureSpacer = styled.span`
+  flex-shrink: 0;
+  width: 20px;
+`;
+
+const DisclosureButton = styled.button<{ $expanded: boolean }>`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: var(--pointer);
+  color: ${s("textSecondary")};
+
+  svg {
+    transition: transform 100ms ease;
+    transform: rotate(${(props) => (props.$expanded ? "0deg" : "-90deg")});
+  }
+
+  &:hover {
+    color: ${s("text")};
   }
 `;
 

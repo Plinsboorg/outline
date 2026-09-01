@@ -17,7 +17,7 @@ import {
 import { subtractDate } from "@shared/utils/date";
 import { bytesToHumanReadable } from "@shared/utils/files";
 import naturalSort from "@shared/utils/naturalSort";
-import { orderRowsByIndex } from "~/scenes/Database/components/rowTree";
+import { orderRowsByIndex } from "@shared/utils/rowTree";
 import type RootStore from "~/stores/RootStore";
 import Store from "~/stores/base/Store";
 import Document from "~/models/Document";
