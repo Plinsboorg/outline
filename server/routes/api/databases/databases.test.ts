@@ -382,6 +382,40 @@ describe("#databases.update", () => {
     expect(res.status).toEqual(400);
   });
 
+  it("should persist a column's text wrapping", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const propertyId = randomUUID();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      dataSchema: [{ id: propertyId, name: "Notes", type: PropertyType.Text }],
+    });
+
+    const res = await server.post("/api/databases.update", user, {
+      body: {
+        id: database.id,
+        views: [
+          {
+            id: randomUUID(),
+            name: "Table",
+            type: "table",
+            columns: [{ propertyId, visible: true, wrap: true, width: 200 }],
+            sorts: [],
+          },
+        ],
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(body.data.views[0].columns[0]).toMatchObject({
+      propertyId,
+      visible: true,
+      wrap: true,
+      width: 200,
+    });
+  });
+
   it("should drop view references to a property removed from the schema", async () => {
     const { team, user, collection } = await buildEnabledTeam();
     const keptId = randomUUID();

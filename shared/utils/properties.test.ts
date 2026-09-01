@@ -325,6 +325,35 @@ describe("validateDataViews", () => {
     ).toThrow(/Unknown property id/);
   });
 
+  it("should accept a wrapping column and reject a non-boolean wrap", () => {
+    expect(() =>
+      validateDataViews(
+        [
+          {
+            ...validView,
+            columns: [
+              { propertyId: selectProperty.id, visible: true, wrap: true },
+            ],
+          },
+        ],
+        schema
+      )
+    ).not.toThrow();
+    expect(() =>
+      validateDataViews(
+        [
+          {
+            ...validView,
+            columns: [
+              { propertyId: selectProperty.id, visible: true, wrap: "yes" },
+            ],
+          },
+        ],
+        schema
+      )
+    ).toThrow(/wrap must be a boolean/);
+  });
+
   it("should reject invalid sort directions", () => {
     expect(() =>
       validateDataViews(

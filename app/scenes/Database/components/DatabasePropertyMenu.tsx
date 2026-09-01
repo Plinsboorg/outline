@@ -43,6 +43,10 @@ type Props = {
   onChangeOptions?: (options: PropertyOption[]) => void;
   /** Callback when the property's config changes, e.g. auto-numbering. */
   onChangeConfig?: (config: PropertyConfig) => void;
+  /** Whether the column's cells wrap onto as many lines as they need. */
+  wrap?: boolean;
+  /** Callback when wrapping is toggled for the column; absent when not allowed. */
+  onToggleWrap?: (wrap: boolean) => void;
   /** Callback when the property is deleted from the schema; absent for the
    * title column, which cannot be deleted. */
   onDelete?: () => void;
@@ -63,6 +67,8 @@ function DatabasePropertyMenu({
   onHide,
   onChangeOptions,
   onChangeConfig,
+  wrap,
+  onToggleWrap,
   onDelete,
   children,
 }: Props) {
@@ -184,6 +190,17 @@ function DatabasePropertyMenu({
               <EyeIcon />
               {t("Hide in view")}
             </MenuItem>
+          )}
+          {onToggleWrap && (
+            <SwitchPadding>
+              <Switch
+                label={t("Wrap text")}
+                labelPosition="right"
+                checked={!!wrap}
+                onChange={onToggleWrap}
+                inForm={false}
+              />
+            </SwitchPadding>
           )}
           {supportsOptions && onChangeOptions && (
             <>

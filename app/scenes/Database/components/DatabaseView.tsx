@@ -538,6 +538,19 @@ function DatabaseView({ database }: Props) {
     [schema, activeView, updateActiveView]
   );
 
+  const handleToggleWrapColumn = React.useCallback(
+    (columnId: string, wrap: boolean) => {
+      const columns = normalizedColumnsForView(schema, activeView).map(
+        (column) =>
+          column.propertyId === columnId
+            ? { ...column, wrap: wrap || undefined }
+            : column
+      );
+      void updateActiveView({ columns });
+    },
+    [schema, activeView, updateActiveView]
+  );
+
   const handleRenameTitle = React.useCallback(
     async (name: string) => {
       try {
@@ -809,6 +822,7 @@ function DatabaseView({ database }: Props) {
           titleName={database.titleName ?? undefined}
           onRenameTitle={can.update ? handleRenameTitle : undefined}
           onResizeColumn={can.update ? handleResizeColumn : undefined}
+          onToggleWrapColumn={can.update ? handleToggleWrapColumn : undefined}
           sort={sort}
           onSetSort={handleSetSort}
           hasFilter={!!filter}

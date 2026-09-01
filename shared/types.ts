@@ -660,6 +660,11 @@ export type DataViewColumn = {
   width?: number;
   /** Whether the column is visible. */
   visible: boolean;
+  /**
+   * Whether cell content wraps onto as many lines as it needs. Unset means the
+   * content stays on a single line, clipped to the column width.
+   */
+  wrap?: boolean;
   /** Aggregation shown in the column footer; unset means no summary. */
   summary?: SummaryAggregation;
 };

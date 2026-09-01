@@ -762,6 +762,9 @@ function validateDataView(
     ) {
       throw new Error("View column width must be a positive number");
     }
+    if (column.wrap !== undefined && typeof column.wrap !== "boolean") {
+      throw new Error("View column wrap must be a boolean");
+    }
     if (column.summary !== undefined) {
       if (
         typeof column.summary !== "string" ||

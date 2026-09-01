@@ -28,6 +28,11 @@ type Props = {
   readOnly?: boolean;
   /** The document the value belongs to, associating uploaded files with it. */
   documentId?: string;
+  /**
+   * Whether the value may occupy as many lines as it needs. Text values render
+   * in a growing textarea rather than a single-line input.
+   */
+  wrap?: boolean;
 };
 
 /**
@@ -40,6 +45,7 @@ function PropertyValueEditor({
   onChange,
   readOnly,
   documentId,
+  wrap,
 }: Props) {
   const { t } = useTranslation();
   const { users } = useStores();
@@ -50,7 +56,7 @@ function PropertyValueEditor({
   );
 
   const handleTextCommit = React.useCallback(
-    (ev: React.FocusEvent<HTMLInputElement>) => {
+    (ev: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       const next = ev.target.value.trim();
       const current = typeof value === "string" ? value : undefined;
       if (next === (current ?? "")) {
@@ -99,17 +105,29 @@ function PropertyValueEditor({
   );
 
   switch (property.type) {
-    case PropertyType.Text:
+    case PropertyType.Text: {
+      const text = typeof value === "string" ? value : "";
+      if (wrap) {
+        return (
+          <AutoSizeTextArea
+            value={text}
+            placeholder={readOnly ? "–" : t("Empty")}
+            onBlur={handleTextCommit}
+            disabled={readOnly}
+          />
+        );
+      }
       return (
         <NudeInput
           type="text"
-          defaultValue={typeof value === "string" ? value : ""}
+          defaultValue={text}
           placeholder={readOnly ? "–" : t("Empty")}
           onBlur={handleTextCommit}
           onKeyDown={handleKeyDown}
           disabled={readOnly}
         />
       );
+    }
 
     case PropertyType.Number: {
       // auto-numbered values are assigned by the server and never edited
@@ -180,7 +198,6 @@ function PropertyValueEditor({
           url={url}
           onCommit={handleTextCommit}
           onKeyDown={handleKeyDown}
-          t={t}
         />
       );
     }
@@ -408,13 +425,12 @@ function UrlCellEditor({
   url,
   onCommit,
   onKeyDown,
-  t,
 }: {
   url: string;
   onCommit: (ev: React.FocusEvent<HTMLInputElement>) => void;
   onKeyDown: (ev: React.KeyboardEvent<HTMLInputElement>) => void;
-  t: ReturnType<typeof useTranslation>["t"];
 }): React.ReactElement {
+  const { t } = useTranslation();
   const [isEditing, setIsEditing] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
@@ -478,10 +494,7 @@ function UrlCellEditor({
   }
 
   return (
-    <UrlLinkCell
-      onClick={handleCellClick}
-      onDoubleClick={handleDoubleClick}
-    >
+    <UrlLinkCell onClick={handleCellClick} onDoubleClick={handleDoubleClick}>
       <UrlLink
         href={sanitizeUrl(url)}
         target="_blank"
@@ -493,6 +506,79 @@ function UrlCellEditor({
         {url}
       </UrlLink>
     </UrlLinkCell>
+  );
+}
+
+/**
+ * A textarea that grows to fit its content, so a long text value is readable
+ * in full rather than scrolling inside a one-line field. Editing is committed
+ * on blur like the single-line editor; Enter inserts a line break.
+ */
+function AutoSizeTextArea({
+  value,
+  placeholder,
+  disabled,
+  onBlur,
+}: {
+  value: string;
+  placeholder?: string;
+  disabled?: boolean;
+  onBlur: (ev: React.FocusEvent<HTMLTextAreaElement>) => void;
+}) {
+  const ref = React.useRef<HTMLTextAreaElement>(null);
+
+  const resize = React.useCallback(() => {
+    const element = ref.current;
+    if (!element) {
+      return;
+    }
+    // measured from a collapsed height, so the field shrinks again as content
+    // is removed rather than only ever growing
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  }, []);
+
+  // the field is uncontrolled while it has focus so typing is never
+  // interrupted, but it follows the value when changed elsewhere
+  React.useLayoutEffect(() => {
+    const element = ref.current;
+    if (element && document.activeElement !== element) {
+      element.value = value;
+    }
+    resize();
+  }, [value, resize]);
+
+  // the same text needs more lines in a narrower column, so the height is
+  // measured again whenever the field is given a new width — resizing a table
+  // column would otherwise leave its rows the wrong height
+  React.useEffect(() => {
+    const element = ref.current;
+    if (!element) {
+      return;
+    }
+    let lastWidth = element.clientWidth;
+    // only width matters: reacting to the height this callback itself sets
+    // would loop
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth !== lastWidth) {
+        lastWidth = element.clientWidth;
+        resize();
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [resize]);
+
+  return (
+    <NudeTextArea
+      ref={ref}
+      rows={1}
+      defaultValue={value}
+      placeholder={placeholder}
+      disabled={disabled}
+      onInput={resize}
+      onBlur={onBlur}
+    />
   );
 }
 
@@ -664,6 +750,38 @@ const NudeInput = styled.input`
   }
 `;
 
+const NudeTextArea = styled.textarea`
+  display: block;
+  border: 0;
+  outline: none;
+  background: none;
+  color: ${s("text")};
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 4px;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+
+  &:hover:not(:disabled),
+  &:focus:not(:disabled) {
+    background: ${s("backgroundSecondary")};
+  }
+
+  &::placeholder {
+    color: ${s("placeholder")};
+  }
+
+  &:disabled {
+    color: ${s("textSecondary")};
+  }
+`;
+
 const Placeholder = styled.span`
   color: ${s("placeholder")};
   padding: 4px 6px;
@@ -680,7 +798,7 @@ const UrlLinkCell = styled.div`
   cursor: text;
   padding: 4px 6px;
   border-radius: 4px;
-  
+
   &:hover {
     background: ${s("backgroundSecondary")};
   }

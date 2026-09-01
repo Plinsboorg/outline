@@ -85,6 +85,7 @@ export const DataViewSchema = z.object({
       propertyId: z.string(),
       width: z.number().optional(),
       visible: z.boolean(),
+      wrap: z.boolean().optional(),
       summary: z.enum(SummaryAggregation).optional(),
     })
   ),

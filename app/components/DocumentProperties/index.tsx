@@ -83,6 +83,9 @@ function DocumentProperties({ document }: Props) {
               onChange={(value) => handleChange(property.id, value)}
               readOnly={!can.update}
               documentId={document.id}
+              // the row's own page has the space to show values in full, so
+              // nothing here is clipped to one line
+              wrap
             />
           </Value>
         </Row>
@@ -99,7 +102,9 @@ const Panel = styled.div`
 
 const Row = styled.div`
   display: flex;
-  align-items: center;
+  /* values grow downwards when they wrap, so the name stays beside the first
+     line of its value rather than floating in the middle of a tall field */
+  align-items: flex-start;
   min-height: 32px;
   gap: 8px;
 `;
@@ -108,13 +113,16 @@ const Name = styled(Text)`
   flex-shrink: 0;
   width: 140px;
   font-size: 14px;
+  padding-top: 6px;
 `;
 
 const Value = styled.div`
   flex-grow: 1;
   min-width: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  padding: 2px 0;
+  overflow-wrap: anywhere;
 `;
 
 export default observer(DocumentProperties);

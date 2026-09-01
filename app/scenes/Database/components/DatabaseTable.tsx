@@ -62,6 +62,8 @@ type Props = {
   onRenameTitle?: (name: string) => void;
   /** Callback persisting a column's width; absent when not allowed. */
   onResizeColumn?: (columnId: string, width: number) => void;
+  /** Callback persisting a column's text wrapping; absent when not allowed. */
+  onToggleWrapColumn?: (columnId: string, wrap: boolean) => void;
   /** The active sort, reflected in the column headers. */
   sort?: DataViewSort;
   /** Callback when a sort direction is chosen for a property; null clears. */
@@ -129,6 +131,7 @@ function DatabaseTable({
   titleName,
   onRenameTitle,
   onResizeColumn,
+  onToggleWrapColumn,
   sort,
   onSetSort,
   hasFilter,
@@ -173,6 +176,18 @@ function DatabaseTable({
   const widthFor = (columnId: string): number | undefined =>
     draftWidths[columnId] ??
     view?.columns.find((column) => column.propertyId === columnId)?.width;
+
+  // columns wrap their content only when the view says so, so a table of long
+  // values stays scannable by default
+  const wrappedColumnIds = React.useMemo(
+    () =>
+      new Set(
+        (view?.columns ?? [])
+          .filter((column) => column.wrap)
+          .map((column) => column.propertyId)
+      ),
+    [view?.columns]
+  );
 
   const handleResizeDraft = React.useCallback(
     (columnId: string, width: number) => {
@@ -229,6 +244,12 @@ function DatabaseTable({
       width={widthFor(property.id)}
       onResizeDraft={onResizeColumn ? handleResizeDraft : undefined}
       onResizeCommit={onResizeColumn ? handleResizeCommit : undefined}
+      wrap={wrappedColumnIds.has(property.id)}
+      onToggleWrap={
+        onToggleWrapColumn
+          ? (wrap: boolean) => onToggleWrapColumn(property.id, wrap)
+          : undefined
+      }
     />
   ));
   headerCells.splice(
@@ -244,6 +265,12 @@ function DatabaseTable({
       width={widthFor(TITLE_COLUMN_ID)}
       onResizeDraft={onResizeColumn ? handleResizeDraft : undefined}
       onResizeCommit={onResizeColumn ? handleResizeCommit : undefined}
+      wrap={wrappedColumnIds.has(TITLE_COLUMN_ID)}
+      onToggleWrap={
+        onToggleWrapColumn
+          ? (wrap: boolean) => onToggleWrapColumn(TITLE_COLUMN_ID, wrap)
+          : undefined
+      }
     />
   );
 
@@ -285,6 +312,7 @@ function DatabaseTable({
           isExpanded={expandedRowIds.has(document.id)}
           onToggleExpand={onToggleRowExpand}
           onAddSubItem={onAddSubItem}
+          wrappedColumnIds={wrappedColumnIds}
         />
       ))}
       {rows.length === 0 && !onNewRow && (
@@ -393,6 +421,8 @@ function DatabaseTableHeader({
   width,
   onResizeDraft,
   onResizeCommit,
+  wrap,
+  onToggleWrap,
 }: {
   property: Property;
   sort?: DataViewSort;
@@ -404,6 +434,8 @@ function DatabaseTableHeader({
   width?: number;
   onResizeDraft?: (columnId: string, width: number) => void;
   onResizeCommit?: (columnId: string, width: number) => void;
+  wrap: boolean;
+  onToggleWrap?: (wrap: boolean) => void;
 }) {
   const { t } = useTranslation();
   const {
@@ -471,6 +503,8 @@ function DatabaseTableHeader({
             onUpdateProperty(property.id, { options })
           }
           onChangeConfig={(config) => onUpdateProperty(property.id, { config })}
+          wrap={wrap}
+          onToggleWrap={onToggleWrap}
           onDelete={() => onDeleteProperty(property.id)}
         >
           {headerContent}
@@ -528,6 +562,8 @@ function DatabaseTableTitleHeader({
   width,
   onResizeDraft,
   onResizeCommit,
+  wrap,
+  onToggleWrap,
 }: {
   name?: string;
   onRename?: (name: string) => void;
@@ -537,6 +573,8 @@ function DatabaseTableTitleHeader({
   width?: number;
   onResizeDraft?: (columnId: string, width: number) => void;
   onResizeCommit?: (columnId: string, width: number) => void;
+  wrap: boolean;
+  onToggleWrap?: (wrap: boolean) => void;
 }) {
   const { t } = useTranslation();
   const {
@@ -607,6 +645,8 @@ function DatabaseTableTitleHeader({
           sort={sort}
           onRename={onRename}
           onSetSort={(direction) => onSetSort(TITLE_COLUMN_ID, direction)}
+          wrap={wrap}
+          onToggleWrap={onToggleWrap}
         >
           {headerContent}
         </DatabasePropertyMenu>
@@ -680,6 +720,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
   isExpanded,
   onToggleExpand,
   onAddSubItem,
+  wrappedColumnIds,
 }: {
   document: Document;
   properties: Property[];
@@ -694,6 +735,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
   isExpanded: boolean;
   onToggleExpand: (rowId: string) => void;
   onAddSubItem?: (parent: Document) => void;
+  wrappedColumnIds: ReadonlySet<string>;
 }) {
   const { t } = useTranslation();
   const can = usePolicy(document);
@@ -754,19 +796,26 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
       )}
       {cellsWithTitle(
         properties.map((property) => (
-          <Cell key={property.id}>
+          <Cell key={property.id} $wrap={wrappedColumnIds.has(property.id)}>
             <PropertyValueEditor
               property={property}
               value={document.propertyValue(property.id)}
               onChange={(value) => handleChange(property.id, value)}
               readOnly={!can.update}
               documentId={document.id}
+              wrap={wrappedColumnIds.has(property.id)}
             />
           </Cell>
         )),
         titleIndex,
-        <TitleCell key={TITLE_COLUMN_ID}>
-          <TitleContent style={{ paddingLeft: depth * 20 }}>
+        <TitleCell
+          key={TITLE_COLUMN_ID}
+          $wrap={wrappedColumnIds.has(TITLE_COLUMN_ID)}
+        >
+          <TitleContent
+            style={{ paddingLeft: depth * 20 }}
+            $wrap={wrappedColumnIds.has(TITLE_COLUMN_ID)}
+          >
             {hasSubItems && (
               <DisclosureButton
                 type="button"
@@ -783,7 +832,10 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
                 <RowTitleInput document={document} onDone={onTitleDone} />
               </TitleInputPadding>
             ) : (
-              <TitleLink to={document.path}>
+              <TitleLink
+                to={document.path}
+                $wrap={wrappedColumnIds.has(TITLE_COLUMN_ID)}
+              >
                 {document.titleWithDefault}
               </TitleLink>
             )}
@@ -888,10 +940,15 @@ const Row = styled.tr<{ $dragging?: boolean }>`
   }
 `;
 
-const Cell = styled.td`
+const Cell = styled.td<{ $wrap?: boolean }>`
   padding: 2px 4px;
-  vertical-align: middle;
   overflow: hidden;
+
+  /* a wrapping column keeps every line of its content, so its cells align to
+     the top of a row grown tall by the longest of them */
+  vertical-align: ${(props) => (props.$wrap ? "top" : "middle")};
+  white-space: ${(props) => (props.$wrap ? "pre-wrap" : "nowrap")};
+  overflow-wrap: ${(props) => (props.$wrap ? "anywhere" : "normal")};
 
   &:not(:last-child) {
     border-right: 1px solid ${s("divider")};
@@ -974,9 +1031,9 @@ const TitleCell = styled(Cell)`
   padding: 0;
 `;
 
-const TitleContent = styled.div`
+const TitleContent = styled.div<{ $wrap?: boolean }>`
   display: flex;
-  align-items: center;
+  align-items: ${(props) => (props.$wrap ? "flex-start" : "center")};
 `;
 
 const DisclosureButton = styled(NudeButton)<{ $expanded: boolean }>`
@@ -1019,12 +1076,22 @@ const TitleInputPadding = styled.div`
   flex-grow: 1;
 `;
 
-const TitleLink = styled(Link)`
+const TitleLink = styled(Link)<{ $wrap?: boolean }>`
   display: block;
   flex-grow: 1;
+  min-width: 0;
   color: ${s("text")};
   font-weight: 500;
   padding: 8px 10px;
+  ${(props) =>
+    props.$wrap
+      ? css`
+          overflow-wrap: anywhere;
+        `
+      : css`
+          overflow: hidden;
+          text-overflow: ellipsis;
+        `}
 
   &:hover {
     text-decoration: underline;
