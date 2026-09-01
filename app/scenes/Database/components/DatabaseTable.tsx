@@ -20,7 +20,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { observer } from "mobx-react";
-import { CollapsedIcon, PlusIcon } from "outline-icons";
+import { CollapsedIcon, OpenIcon, PlusIcon } from "outline-icons";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -98,6 +98,9 @@ type Props = {
   parentRowIds: ReadonlySet<string>;
   /** Ids of rows whose sub-items are currently shown. */
   expandedRowIds: ReadonlySet<string>;
+  /** The rows whose open sub-item list ends after a given row, innermost
+   * first — each gets a button to add one more sub-item. */
+  listEndsAfter: ReadonlyMap<string, Document[]>;
   /** Callback toggling a row's sub-items open or closed. */
   onToggleRowExpand: (rowId: string) => void;
   /** Callback creating a sub-item under a row; absent when not allowed. */
@@ -149,6 +152,7 @@ function DatabaseTable({
   rowDepths,
   parentRowIds,
   expandedRowIds,
+  listEndsAfter,
   onToggleRowExpand,
   onAddSubItem,
   propertiesToggle,
@@ -297,23 +301,45 @@ function DatabaseTable({
   const body = (
     <tbody>
       {rows.map((document) => (
-        <DatabaseTableRow
-          key={document.id}
-          document={document}
-          properties={properties}
-          titleIndex={titleIndex}
-          isEditingTitle={document.id === newRowId}
-          onTitleDone={onNewRowDone}
-          hasControlsColumn={hasControlsColumn}
-          isSortable={hasGripColumn}
-          onDelete={onDeleteRow}
-          depth={rowDepths.get(document.id) ?? 0}
-          hasSubItems={parentRowIds.has(document.id)}
-          isExpanded={expandedRowIds.has(document.id)}
-          onToggleExpand={onToggleRowExpand}
-          onAddSubItem={onAddSubItem}
-          wrappedColumnIds={wrappedColumnIds}
-        />
+        <React.Fragment key={document.id}>
+          <DatabaseTableRow
+            document={document}
+            properties={properties}
+            titleIndex={titleIndex}
+            isEditingTitle={document.id === newRowId}
+            onTitleDone={onNewRowDone}
+            hasControlsColumn={hasControlsColumn}
+            isSortable={hasGripColumn}
+            onDelete={onDeleteRow}
+            depth={rowDepths.get(document.id) ?? 0}
+            hasSubItems={parentRowIds.has(document.id)}
+            isExpanded={expandedRowIds.has(document.id)}
+            onToggleExpand={onToggleRowExpand}
+            onAddSubItem={onAddSubItem}
+            wrappedColumnIds={wrappedColumnIds}
+          />
+          {/* an open sub-item list gets its own footer button, so sub-items
+              can be added one after another without reaching for a menu */}
+          {onAddSubItem &&
+            listEndsAfter.get(document.id)?.map((parent) => (
+              <tr key={`add-${parent.id}`}>
+                <NewRowCell colSpan={columnCount}>
+                  <NewRowButton
+                    type="button"
+                    onClick={() => onAddSubItem(parent)}
+                    width="100%"
+                    height={32}
+                    style={{
+                      paddingLeft: ((rowDepths.get(parent.id) ?? 0) + 1) * 20,
+                    }}
+                  >
+                    <PlusIcon size={18} />
+                    {t("New sub-item")}
+                  </NewRowButton>
+                </NewRowCell>
+              </tr>
+            ))}
+        </React.Fragment>
       ))}
       {rows.length === 0 && !onNewRow && (
         <tr>
@@ -739,6 +765,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
 }) {
   const { t } = useTranslation();
   const can = usePolicy(document);
+  const [isRenaming, setIsRenaming] = React.useState(false);
   const {
     attributes,
     listeners,
@@ -747,6 +774,11 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
     transition,
     isDragging,
   } = useSortable({ id: document.id, disabled: !isSortable });
+
+  const handleTitleDone = React.useCallback(() => {
+    setIsRenaming(false);
+    onTitleDone();
+  }, [onTitleDone]);
 
   const handleChange = async (
     propertyId: string,
@@ -827,17 +859,36 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
                 <CollapsedIcon size={18} />
               </DisclosureButton>
             )}
-            {isEditingTitle ? (
+            {isEditingTitle || isRenaming ? (
               <TitleInputPadding>
-                <RowTitleInput document={document} onDone={onTitleDone} />
+                <RowTitleInput document={document} onDone={handleTitleDone} />
               </TitleInputPadding>
             ) : (
-              <TitleLink
-                to={document.path}
-                $wrap={wrappedColumnIds.has(TITLE_COLUMN_ID)}
-              >
-                {document.titleWithDefault}
-              </TitleLink>
+              <>
+                {can.update ? (
+                  // clicking the title renames the row in place, the way a
+                  // cell of any other column is edited; the row's page is
+                  // opened by the button beside it
+                  <TitleText
+                    type="button"
+                    onClick={() => setIsRenaming(true)}
+                    $wrap={wrappedColumnIds.has(TITLE_COLUMN_ID)}
+                  >
+                    {document.titleWithDefault}
+                  </TitleText>
+                ) : (
+                  <TitleLink
+                    to={document.path}
+                    $wrap={wrappedColumnIds.has(TITLE_COLUMN_ID)}
+                  >
+                    {document.titleWithDefault}
+                  </TitleLink>
+                )}
+                <OpenLink to={document.path} aria-label={t("Open")}>
+                  <OpenIcon size={16} />
+                  <OpenLabel>{t("Open")}</OpenLabel>
+                </OpenLink>
+              </>
             )}
           </TitleContent>
         </TitleCell>
@@ -1076,7 +1127,8 @@ const TitleInputPadding = styled.div`
   flex-grow: 1;
 `;
 
-const TitleLink = styled(Link)<{ $wrap?: boolean }>`
+/** The shared look of the title, whether it renames in place or links out. */
+const titleFace = css<{ $wrap?: boolean }>`
   display: block;
   flex-grow: 1;
   min-width: 0;
@@ -1091,7 +1143,65 @@ const TitleLink = styled(Link)<{ $wrap?: boolean }>`
       : css`
           overflow: hidden;
           text-overflow: ellipsis;
+          white-space: nowrap;
         `}
+`;
+
+const TitleText = styled.button<{ $wrap?: boolean }>`
+  ${titleFace}
+  border: 0;
+  background: none;
+  font-size: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: text;
+  border-radius: 4px;
+
+  &:hover,
+  &:focus-visible {
+    background: ${s("backgroundSecondary")};
+  }
+`;
+
+/** Opens the row's own page; the title itself renames instead. */
+const OpenLink = styled(Link)`
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-right: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: ${s("textSecondary")};
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: ${s("backgroundSecondary")};
+
+  /* chrome rather than data — out of the way until the row is pointed at */
+  opacity: 0;
+  transition: opacity 100ms ease-in-out;
+
+  ${Row}:hover &,
+  &:focus-visible {
+    opacity: 1;
+  }
+
+  &:hover {
+    color: ${s("text")};
+  }
+`;
+
+/** The word beside the icon, dropped when the column is too narrow for it. */
+const OpenLabel = styled.span`
+  @media (max-width: 600px) {
+    display: none;
+  }
+`;
+
+const TitleLink = styled(Link)<{ $wrap?: boolean }>`
+  ${titleFace}
 
   &:hover {
     text-decoration: underline;

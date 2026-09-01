@@ -36,6 +36,12 @@ export type RowTree<T extends RowLike> = {
   depthById: Map<string, number>;
   /** Ids of rows that have at least one child row loaded. */
   parentIds: Set<string>;
+  /**
+   * The rows whose shown sub-item list ends after a given row, innermost
+   * first — where an "add sub-item" affordance belongs at the foot of each
+   * open list.
+   */
+  listEndsAfter: Map<string, T[]>;
   /** Whether any loaded row nests under another. */
   hasNesting: boolean;
 };
@@ -75,6 +81,7 @@ export function buildRowTree<T extends RowLike>(
 
   const visibleRows: T[] = [];
   const depthById = new Map<string, number>();
+  const listEndsAfter = new Map<string, T[]>();
 
   const walk = (list: T[], depth: number) => {
     for (const row of list) {
@@ -85,6 +92,15 @@ export function buildRowTree<T extends RowLike>(
       const children = childrenByParent.get(row.id);
       if (children && expandedIds.has(row.id)) {
         walk(children, depth + 1);
+        // the last row walked closes this row's list; several lists can end
+        // at once when the last child is an open parent itself
+        const last = visibleRows[visibleRows.length - 1];
+        const ends = listEndsAfter.get(last.id);
+        if (ends) {
+          ends.push(row);
+        } else {
+          listEndsAfter.set(last.id, [row]);
+        }
       }
     }
   };
@@ -94,6 +110,7 @@ export function buildRowTree<T extends RowLike>(
     visibleRows,
     depthById,
     parentIds: new Set(childrenByParent.keys()),
+    listEndsAfter,
     hasNesting: childrenByParent.size > 0,
   };
 }

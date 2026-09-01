@@ -57,6 +57,26 @@ describe("buildRowTree", () => {
     expect(expanded.depthById.get("a1x")).toBe(2);
   });
 
+  it("marks where each open sub-item list ends", () => {
+    const rows = [row("a"), row("a1", "a"), row("a1x", "a1"), row("b")];
+
+    const collapsed = buildRowTree(rows, new Set());
+    expect(collapsed.listEndsAfter.size).toBe(0);
+
+    // one list ends after the last child of the only open parent
+    const outer = buildRowTree(rows, new Set(["a"]));
+    expect([...outer.listEndsAfter.keys()]).toEqual(["a1"]);
+    expect(outer.listEndsAfter.get("a1")?.map((item) => item.id)).toEqual(["a"]);
+
+    // both lists end after the same row when the last child is open itself,
+    // innermost first
+    const nested = buildRowTree(rows, new Set(["a", "a1"]));
+    expect(nested.listEndsAfter.get("a1x")?.map((item) => item.id)).toEqual([
+      "a1",
+      "a",
+    ]);
+  });
+
   it("treats a row whose parent is not loaded as top level", () => {
     const rows = [row("a"), row("orphan", "missing")];
     const tree = buildRowTree(rows, new Set());

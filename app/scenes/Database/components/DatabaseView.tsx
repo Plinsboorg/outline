@@ -814,6 +814,7 @@ function DatabaseView({ database }: Props) {
           rowDepths={rowTree.depthById}
           parentRowIds={rowTree.parentIds}
           expandedRowIds={expandedRowIds}
+          listEndsAfter={rowTree.listEndsAfter}
           onToggleRowExpand={handleToggleRowExpand}
           onAddSubItem={canCreateRow ? handleNewSubItem : undefined}
           propertiesToggle={
