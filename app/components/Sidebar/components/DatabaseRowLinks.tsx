@@ -16,7 +16,11 @@ import { useDocumentMenuAction } from "~/hooks/useDocumentMenuAction";
 import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
 import { documentPath } from "~/utils/routeHelpers";
-import { useDragDocument, useDropToReorderRow } from "../hooks/useDragAndDrop";
+import {
+  useDragDocument,
+  useDropToReorderRow,
+  useDropToReparentDocument,
+} from "../hooks/useDragAndDrop";
 import DocumentRow from "./DocumentRow";
 import DropCursor from "./DropCursor";
 import { useSidebarContext } from "./SidebarContext";
@@ -161,6 +165,15 @@ const DatabaseRowLink = observer(function DatabaseRowLink_({
     setExpanded(false);
   }, []);
 
+  // a document dropped onto a row nests under it as a sub-item, joining the
+  // database if it was not a row already
+  const parentRef = React.useRef<HTMLDivElement>(null);
+  const [{ isOverReparent }, dropToReparent] = useDropToReparentDocument(
+    row.asNavigationNode,
+    handleExpand,
+    parentRef
+  );
+
   const handleCreateSubItem = React.useCallback(
     async (input: string) => {
       const newDocument = await documents.create(
@@ -218,6 +231,9 @@ const DatabaseRowLink = observer(function DatabaseRowLink_({
         onEditingChange={setIsEditing}
         dragRef={drag}
         isDragging={isDragging}
+        parentRef={parentRef}
+        dropToReparentRef={dropToReparent}
+        isActiveDropTarget={isOverReparent}
         cursorAfter={
           canReorder ? (
             <DropCursor isActiveDrop={isOverReorder} innerRef={dropToReorder} />

@@ -1061,12 +1061,101 @@ describe("row sub-items", () => {
     expect(body.data.publishedAt).toBeTruthy();
   });
 
-  it("should not move a row on its own", async () => {
+  it("should take a row out of its database when moved away, keeping its values as text", async () => {
     const { team, user, collection } = await buildEnabledTeam();
     const destination = await buildCollection({
       teamId: team.id,
       userId: user.id,
     });
+    const propertyId = randomUUID();
+    const optionId = randomUUID();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      dataSchema: [
+        {
+          id: propertyId,
+          name: "Stage",
+          type: PropertyType.Select,
+          options: [{ id: optionId, name: "Shipped" }],
+        },
+      ],
+    });
+    const row = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+      text: "Body text",
+      properties: { [propertyId]: optionId },
+    });
+
+    const res = await server.post("/api/documents.move", user, {
+      body: { id: row.id, collectionId: destination.id },
+    });
+    expect(res.status).toEqual(200);
+
+    await row.reload();
+    expect(row.databaseId).toBeNull();
+    expect(row.databaseIndex).toBeNull();
+    expect(row.properties).toEqual({});
+    expect(row.collectionId).toEqual(destination.id);
+    // the values it had are readable in the body it keeps
+    expect(row.text).toContain("Body text");
+    expect(row.text).toContain("Stage");
+    expect(row.text).toContain("Shipped");
+
+    // and it is a document of the destination collection again
+    await destination.reload();
+    expect(JSON.stringify(destination.documentStructure)).toContain(row.id);
+  });
+
+  it("should make a document moved onto a database one of its rows", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const other = await buildCollection({ teamId: team.id, userId: user.id });
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const document = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: other.id,
+    });
+    const child = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: other.id,
+      parentDocumentId: document.id,
+    });
+
+    const res = await server.post("/api/documents.move", user, {
+      body: { id: document.id, parentDocumentId: database.id },
+    });
+    expect(res.status).toEqual(200);
+
+    await document.reload();
+    expect(document.databaseId).toEqual(database.id);
+    expect(document.databaseIndex).toBeTruthy();
+    // the anchor document carries the database, so a top-level row has no
+    // parent of its own
+    expect(document.parentDocumentId).toBeNull();
+    expect(document.collectionId).toEqual(collection.id);
+
+    // what hung beneath it comes along as sub-items of the same database
+    await child.reload();
+    expect(child.databaseId).toEqual(database.id);
+    expect(child.parentDocumentId).toEqual(document.id);
+
+    // rows are reached through their database, not the collection tree
+    await other.reload();
+    expect(JSON.stringify(other.documentStructure)).not.toContain(document.id);
+  });
+
+  it("should make a document moved onto a row a sub-item of the same database", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
     const database = await buildDatabase({
       teamId: team.id,
       userId: user.id,
@@ -1078,9 +1167,37 @@ describe("row sub-items", () => {
       collectionId: collection.id,
       databaseId: database.id,
     });
+    const document = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
 
     const res = await server.post("/api/documents.move", user, {
-      body: { id: row.id, collectionId: destination.id },
+      body: { id: document.id, parentDocumentId: row.id },
+    });
+    expect(res.status).toEqual(200);
+
+    await document.reload();
+    expect(document.databaseId).toEqual(database.id);
+    expect(document.parentDocumentId).toEqual(row.id);
+  });
+
+  it("should refuse to move a database inside another database", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const other = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+
+    const res = await server.post("/api/documents.move", user, {
+      body: { id: other.id, parentDocumentId: database.id },
     });
     expect(res.status).toEqual(400);
   });

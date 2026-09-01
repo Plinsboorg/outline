@@ -348,6 +348,47 @@ export class DocumentHelper {
     document: Document,
     schema: Property[]
   ): string {
+    return serializeFrontmatter(
+      DocumentHelper.propertyValuesByName(document, schema)
+    );
+  }
+
+  /**
+   * Serializes a document's property values to a markdown list, for keeping
+   * them readable in the body of a document that is leaving its database and
+   * so is about to lose the values themselves.
+   *
+   * @param document The document whose properties to serialize
+   * @param schema The database's data schema
+   * @returns The markdown block, or an empty string when there are no values.
+   */
+  static propertiesToMarkdown(document: Document, schema: Property[]): string {
+    const data = DocumentHelper.propertyValuesByName(document, schema);
+    const entries = Object.entries(data);
+    if (entries.length === 0) {
+      return "";
+    }
+
+    const lines = entries.map(
+      ([name, value]) =>
+        `- **${name}**: ${Array.isArray(value) ? value.join(", ") : String(value)}`
+    );
+    return `\n\n**Properties**\n\n${lines.join("\n")}\n`;
+  }
+
+  /**
+   * Reads a document's property values keyed by their display name, resolving
+   * select and multiSelect values to option names for portability. Properties
+   * with no value are left out.
+   *
+   * @param document The document whose properties to read
+   * @param schema The database's data schema
+   * @returns The values, keyed by property name.
+   */
+  private static propertyValuesByName(
+    document: Document,
+    schema: Property[]
+  ): Record<string, unknown> {
     const data: Record<string, unknown> = {};
 
     for (const property of schema) {
@@ -376,7 +417,7 @@ export class DocumentHelper {
       }
     }
 
-    return serializeFrontmatter(data);
+    return data;
   }
 
   /**

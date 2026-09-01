@@ -34,6 +34,7 @@ import documentCreator, {
   authorizeDocumentCreate,
   authorizeDocumentPublish,
 } from "@server/commands/documentCreator";
+import documentDatabaseTransfer from "@server/commands/documentDatabaseTransfer";
 import documentDuplicator from "@server/commands/documentDuplicator";
 import documentLoader from "@server/commands/documentLoader";
 import documentMover from "@server/commands/documentMover";
@@ -1591,14 +1592,12 @@ router.post(
     });
     authorize(user, "move", document);
 
-    // a row lives in its database and follows the anchor document around; it
-    // cannot be moved on its own or it would fall out of the database's
-    // collection
-    if (document.databaseId) {
-      throw InvalidRequestError(
-        "Rows move with their database; move the database's document instead"
-      );
-    }
+    // moving a document under a database's document makes it a row of that
+    // database, the same way creating one there does: under the anchor it is a
+    // top-level row, under a row it is a sub-item. Moving a row anywhere else
+    // takes it out of its database again.
+    let targetDatabaseId: string | null = null;
+    let rowParentDocumentId = parentDocumentId;
 
     if (parentDocumentId) {
       const parent = await Document.findByPk(parentDocumentId, {
@@ -1611,6 +1610,34 @@ router.post(
       if (!parent.publishedAt) {
         throw InvalidRequestError("Cannot move document inside a draft");
       }
+
+      if (parent.databaseId) {
+        targetDatabaseId = parent.databaseId;
+      } else {
+        const parentFacet = await Database.findByPk(parent.id, {
+          attributes: ["id"],
+          transaction,
+        });
+        // the anchor document carries the database's identity, so parenting a
+        // row under it adds nothing over the databaseId
+        if (parentFacet) {
+          targetDatabaseId = parentFacet.id;
+          rowParentDocumentId = null;
+        }
+      }
+
+      if (targetDatabaseId && targetDatabaseId !== document.databaseId) {
+        const database = await Database.findByPk(targetDatabaseId, {
+          transaction,
+        });
+        if (database) {
+          database.document = await Document.findByPk(database.id, {
+            userId: user.id,
+            transaction,
+          });
+        }
+        authorize(user, "createRow", database);
+      }
     } else if (collectionId) {
       const collection = await Collection.findByPk(collectionId, {
         userId: user.id,
@@ -1621,10 +1648,17 @@ router.post(
       throw InvalidRequestError("collectionId is required to move a document");
     }
 
+    // properties are rewritten into the body before the move, so the document
+    // that documentMover saves carries both changes at once
+    await documentDatabaseTransfer(ctx, {
+      document,
+      databaseId: targetDatabaseId,
+    });
+
     const { documents, collectionChanged } = await documentMover(ctx, {
       document,
       collectionId: collectionId ?? null,
-      parentDocumentId,
+      parentDocumentId: rowParentDocumentId,
       index,
     });
 

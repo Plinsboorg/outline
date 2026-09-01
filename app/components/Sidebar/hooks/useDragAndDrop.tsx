@@ -15,6 +15,7 @@ import type GroupMembership from "~/models/GroupMembership";
 import type Star from "~/models/Star";
 import type DocumentsStore from "~/stores/DocumentsStore";
 import UserMembership from "~/models/UserMembership";
+import ConfirmationDialog from "~/components/ConfirmationDialog";
 import ConfirmMoveDialog from "~/components/ConfirmMoveDialog";
 import { planRowMove } from "~/scenes/Database/components/rowTree";
 import useCurrentUser from "~/hooks/useCurrentUser";
@@ -35,10 +36,7 @@ export type DragObject = NavigationNode & {
 };
 
 /**
- * Whether a dragged document is a database row. Rows are arranged inside their
- * database by index, so the drop targets that move documents through the
- * collection's structure have to turn them away — `useDropToReorderRow` is the
- * one that takes them.
+ * Whether a dragged document is a database row.
  *
  * @param documents the documents store.
  * @param id the id of the dragged document.
@@ -46,6 +44,64 @@ export type DragObject = NavigationNode & {
  */
 function isRow(documents: DocumentsStore, id: string): boolean {
   return !!documents.get(id)?.databaseId;
+}
+
+type MoveParams = {
+  documentId: string;
+  collectionId?: string;
+  parentDocumentId?: string;
+  index?: number;
+};
+
+/**
+ * Returns a move that asks first when it would take a row out of its database.
+ * A row's property values only survive the move as text in the body of the
+ * document, and the columns themselves are gone, so this is not something to
+ * do behind the user's back.
+ *
+ * @returns a function performing the move, with confirmation where needed.
+ */
+function useMoveDocument() {
+  const { documents, databases, dialogs } = useStores();
+  const { t } = useTranslation();
+
+  return React.useCallback(
+    async (params: MoveParams) => {
+      const document = documents.get(params.documentId);
+      const parent = params.parentDocumentId
+        ? documents.get(params.parentDocumentId)
+        : undefined;
+      // dropping onto a database's document, or onto one of its rows, puts the
+      // document in that database
+      const targetDatabaseId = parent
+        ? (parent.databaseId ??
+          (databases.get(parent.id) ? parent.id : undefined))
+        : undefined;
+
+      if (!document?.databaseId || document.databaseId === targetDatabaseId) {
+        await documents.move(params);
+        return;
+      }
+
+      dialogs.openModal({
+        title: t("Take out of database?"),
+        content: (
+          <ConfirmationDialog
+            onSubmit={() => documents.move(params)}
+            submitText={t("Take out")}
+            savingText={`${t("Moving")}…`}
+            danger
+          >
+            {t(
+              "{{ documentName }} will no longer have the properties of its database. Their values are kept as text at the end of the document, but the properties themselves cannot be brought back by moving it in again.",
+              { documentName: document.titleWithDefault }
+            )}
+          </ConfirmationDialog>
+        ),
+      });
+    },
+    [documents, databases, dialogs, t]
+  );
 }
 
 function useHover(
@@ -245,6 +301,7 @@ export function useDropToChangeCollection(
   const { t } = useTranslation();
   const { documents, collections, dialogs, policies } = useStores();
   const can = usePolicy(collection);
+  const moveDocument = useMoveDocument();
   const startHover = useHover(parentRef, expandNode);
 
   return useDrop<
@@ -261,6 +318,17 @@ export function useDropToChangeCollection(
       const { id, collectionId } = item;
       const prevCollection = collections.get(collectionId);
       const document = documents.get(id);
+
+      // a row dropped on a collection leaves its database, which is asked
+      // about rather than folded into the permission question below
+      if (isRow(documents, id)) {
+        await moveDocument({
+          documentId: id,
+          collectionId: collection.id,
+          index: 0,
+        });
+        return;
+      }
 
       if (
         prevCollection &&
@@ -298,10 +366,7 @@ export function useDropToChangeCollection(
         }
       }
     },
-    canDrop: (item) =>
-      can.createDocument &&
-      !!policies.abilities(item.id).move &&
-      !isRow(documents, item.id),
+    canDrop: (item) => can.createDocument && !!policies.abilities(item.id).move,
     hover: (_, monitor) => {
       if (
         collection.hasDocuments &&
@@ -338,6 +403,7 @@ export function useDropToReparentDocument(
     () => document?.pathTo.map((item) => item.id),
     [document]
   );
+  const moveDocument = useMoveDocument();
 
   const startHover = useHover(parentRef, setExpanded);
 
@@ -345,6 +411,17 @@ export function useDropToReparentDocument(
     accept: "document",
     drop: async (item, monitor) => {
       if (monitor.didDrop() || !node) {
+        return;
+      }
+
+      // a row nests under the document it was dropped on, or leaves its
+      // database to do so — either way the move knows what to ask
+      if (isRow(documents, item.id)) {
+        await moveDocument({
+          documentId: item.id,
+          parentDocumentId: node.id,
+        });
+        setExpanded();
         return;
       }
 
@@ -393,12 +470,7 @@ export function useDropToReparentDocument(
       }
     },
     canDrop: (item) => {
-      if (
-        !node ||
-        item.id === node.id ||
-        !policies.abilities(item.id).move ||
-        isRow(documents, item.id)
-      ) {
+      if (!node || item.id === node.id || !policies.abilities(item.id).move) {
         return false;
       }
 
@@ -508,17 +580,14 @@ export function useDropToReorderDocument(
 ) {
   const { t } = useTranslation();
   const { documents, collections, dialogs, policies } = useStores();
+  const moveDocument = useMoveDocument();
 
   const document = documents.get(node.id);
 
   return useDrop<DragObject, Promise<void>, { isOverReorder: boolean }>({
     accept: "document",
     canDrop: (item: DragObject) => {
-      if (
-        item.id === node.id ||
-        (document && !document.isActive) ||
-        isRow(documents, item.id)
-      ) {
+      if (item.id === node.id || (document && !document.isActive)) {
         return false;
       }
       return !!policies.abilities(item.id).move;
@@ -536,6 +605,13 @@ export function useDropToReorderDocument(
       const params = getMoveParams(item);
 
       if (params) {
+        // a row landing among ordinary documents leaves its database, which
+        // the move asks about before going ahead
+        if (isRow(documents, item.id)) {
+          await moveDocument(params);
+          return;
+        }
+
         const prevCollection = collections.get(item.collectionId);
 
         if (
