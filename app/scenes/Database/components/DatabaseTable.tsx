@@ -844,10 +844,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
           key={TITLE_COLUMN_ID}
           $wrap={wrappedColumnIds.has(TITLE_COLUMN_ID)}
         >
-          <TitleContent
-            style={{ paddingLeft: depth * 20 }}
-            $wrap={wrappedColumnIds.has(TITLE_COLUMN_ID)}
-          >
+          <TitleContent style={{ paddingLeft: depth * 20 }}>
             {hasSubItems && (
               <DisclosureButton
                 type="button"
@@ -995,9 +992,9 @@ const Cell = styled.td<{ $wrap?: boolean }>`
   padding: 2px 4px;
   overflow: hidden;
 
-  /* a wrapping column keeps every line of its content, so its cells align to
-     the top of a row grown tall by the longest of them */
-  vertical-align: ${(props) => (props.$wrap ? "top" : "middle")};
+  /* wrapping changes how many lines a value takes, nothing else — cells stay
+     centred in a row however tall its tallest one has made it */
+  vertical-align: middle;
   white-space: ${(props) => (props.$wrap ? "pre-wrap" : "nowrap")};
   overflow-wrap: ${(props) => (props.$wrap ? "anywhere" : "normal")};
 
@@ -1082,9 +1079,9 @@ const TitleCell = styled(Cell)`
   padding: 0;
 `;
 
-const TitleContent = styled.div<{ $wrap?: boolean }>`
+const TitleContent = styled.div`
   display: flex;
-  align-items: ${(props) => (props.$wrap ? "flex-start" : "center")};
+  align-items: center;
 `;
 
 const DisclosureButton = styled(NudeButton)<{ $expanded: boolean }>`

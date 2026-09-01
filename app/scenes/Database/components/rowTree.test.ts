@@ -66,7 +66,9 @@ describe("buildRowTree", () => {
     // one list ends after the last child of the only open parent
     const outer = buildRowTree(rows, new Set(["a"]));
     expect([...outer.listEndsAfter.keys()]).toEqual(["a1"]);
-    expect(outer.listEndsAfter.get("a1")?.map((item) => item.id)).toEqual(["a"]);
+    expect(outer.listEndsAfter.get("a1")?.map((item) => item.id)).toEqual([
+      "a",
+    ]);
 
     // both lists end after the same row when the last child is open itself,
     // innermost first
