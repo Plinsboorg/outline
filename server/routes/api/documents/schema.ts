@@ -492,6 +492,24 @@ export const DocumentsCreateSchema = BaseSchema.extend({
     /** Database to create the document as a row of */
     databaseId: z.uuid().optional(),
 
+    /**
+     * Typed property values the new row holds, keyed by property id. Only
+     * meaningful for a row — a document outside a database has no schema to
+     * read them against.
+     */
+    properties: z
+      .record(
+        z.string(),
+        z.union([
+          z.string(),
+          z.number(),
+          z.boolean(),
+          z.array(z.string()),
+          z.null(),
+        ])
+      )
+      .optional(),
+
     /** Index to create the document at within the collection */
     index: z.number().optional(),
 

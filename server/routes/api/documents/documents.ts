@@ -1881,6 +1881,7 @@ router.post(
       index,
       collectionId,
       databaseId,
+      properties,
       parentDocumentId,
       fullWidth,
       templateId,
@@ -1983,6 +1984,9 @@ router.post(
       index,
       collectionId: collection?.id,
       databaseId: database?.id,
+      // property values mean nothing outside a database, so they are only
+      // stored when the new document is a row of one
+      properties: database ? properties : undefined,
       parentDocumentId: rowParentDocumentId,
       template,
       fullWidth,
@@ -1991,6 +1995,17 @@ router.post(
 
     if (collection) {
       document.collection = collection;
+    }
+
+    // a bidirectional relation is stored on both rows, so a row created
+    // holding one has to be written to the row it points at
+    if (properties && database) {
+      await RelationHelper.syncInverseValues(
+        document,
+        database.dataSchema,
+        {},
+        { transaction }
+      );
     }
 
     ctx.body = {

@@ -17,6 +17,7 @@ import { createContext } from "@server/context";
 import { parser } from "@server/editor";
 import type { Group, User } from "@server/models";
 import {
+  Database,
   Document,
   View,
   Revision,
@@ -3531,6 +3532,71 @@ describe("#documents.create", () => {
     ).not.toEqual(true);
   });
 
+  it("should store property values passed when creating a row", async () => {
+    const team = await buildTeam({
+      preferences: { documentDatabases: true },
+    });
+    const user = await buildUser({ teamId: team.id });
+    const collection = await buildCollection({
+      teamId: team.id,
+      userId: user.id,
+    });
+    const propertyId = randomUUID();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      dataSchema: [
+        {
+          id: propertyId,
+          name: "Status",
+          type: PropertyType.Text,
+        },
+      ],
+    });
+
+    const res = await server.post("/api/documents.create", user, {
+      body: {
+        title: "Row",
+        collectionId: collection.id,
+        databaseId: database.id,
+        properties: { [propertyId]: "Shipped" },
+        publish: true,
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(body.data.properties[propertyId]).toEqual("Shipped");
+
+    const row = await Document.findByPk(body.data.id);
+    expect(row?.properties?.[propertyId]).toEqual("Shipped");
+  });
+
+  it("should ignore property values for a document that is not a row", async () => {
+    const team = await buildTeam({
+      preferences: { documentDatabases: true },
+    });
+    const user = await buildUser({ teamId: team.id });
+    const collection = await buildCollection({
+      teamId: team.id,
+      userId: user.id,
+    });
+
+    const res = await server.post("/api/documents.create", user, {
+      body: {
+        title: "Not a row",
+        collectionId: collection.id,
+        properties: { [randomUUID()]: "Shipped" },
+        publish: true,
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+
+    const document = await Document.findByPk(body.data.id);
+    expect(document?.properties ?? {}).toEqual({});
+  });
+
   it("should assign the next value of an auto-numbered property to a new row", async () => {
     const team = await buildTeam({
       preferences: { documentDatabases: true },
@@ -6146,6 +6212,123 @@ describe("#documents.duplicate", () => {
     });
 
     expect(res.status).toEqual(403);
+  });
+
+  it("should duplicate a database with its schema, views and rows", async () => {
+    const team = await buildTeam({
+      preferences: { documentDatabases: true },
+    });
+    const user = await buildUser({ teamId: team.id });
+    const collection = await buildCollection({
+      teamId: team.id,
+      userId: user.id,
+    });
+    const propertyId = randomUUID();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      dataSchema: [
+        {
+          id: propertyId,
+          name: "Status",
+          type: PropertyType.Text,
+        },
+      ],
+    });
+    const row = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+      title: "First row",
+      properties: { [propertyId]: "Shipped" },
+    });
+    await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+      parentDocumentId: row.id,
+      title: "Sub-item",
+    });
+
+    const res = await server.post("/api/documents.duplicate", user, {
+      body: {
+        id: database.id,
+        collectionId: collection.id,
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+
+    const anchor = body.data.documents.find(
+      (doc: { id: string }) => doc.id !== database.id
+    );
+    const copiedDatabase = await Database.findByPk(anchor.id);
+    expect(copiedDatabase).toBeTruthy();
+    expect(copiedDatabase?.dataSchema).toEqual(database.dataSchema);
+    expect(copiedDatabase?.views).toEqual(database.views);
+
+    const copiedRows = await Document.unscoped().findAll({
+      where: { databaseId: anchor.id },
+      order: [["createdAt", "ASC"]],
+    });
+    expect(copiedRows.length).toEqual(2);
+
+    const copiedRow = copiedRows.find((doc) => doc.title === "First row");
+    const copiedSubItem = copiedRows.find((doc) => doc.title === "Sub-item");
+    expect(copiedRow?.properties?.[propertyId]).toEqual("Shipped");
+    // the copy of a sub-item hangs under the copy of its parent, not the
+    // original row it was taken from
+    expect(copiedSubItem?.parentDocumentId).toEqual(copiedRow?.id);
+    expect(copiedRow?.publishedAt).toBeTruthy();
+  });
+
+  it("should duplicate a row as a row of the same database", async () => {
+    const team = await buildTeam({
+      preferences: { documentDatabases: true },
+    });
+    const user = await buildUser({ teamId: team.id });
+    const collection = await buildCollection({
+      teamId: team.id,
+      userId: user.id,
+    });
+    const propertyId = randomUUID();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      dataSchema: [
+        {
+          id: propertyId,
+          name: "Status",
+          type: PropertyType.Text,
+        },
+      ],
+    });
+    const row = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+      title: "Row",
+      properties: { [propertyId]: "Shipped" },
+    });
+
+    const res = await server.post("/api/documents.duplicate", user, {
+      body: {
+        id: row.id,
+        collectionId: collection.id,
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+
+    const copy = await Document.findByPk(body.data.documents[0].id);
+    expect(copy?.databaseId).toEqual(database.id);
+    expect(copy?.properties?.[propertyId]).toEqual("Shipped");
+    expect(copy?.databaseIndex).toBeTruthy();
   });
 });
 

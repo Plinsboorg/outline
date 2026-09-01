@@ -1183,6 +1183,68 @@ describe("row sub-items", () => {
     expect(document.parentDocumentId).toEqual(row.id);
   });
 
+  it("should re-parent an existing row under another row of its database", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const parent = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+    });
+    const row = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+    });
+
+    const res = await server.post("/api/documents.move", user, {
+      body: { id: row.id, parentDocumentId: parent.id },
+    });
+    expect(res.status).toEqual(200);
+
+    await row.reload();
+    expect(row.parentDocumentId).toEqual(parent.id);
+    // it is still a row of the same database, with its values intact
+    expect(row.databaseId).toEqual(database.id);
+  });
+
+  it("should pull a sub-item back to the top level of its database", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const parent = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+    });
+    const subItem = await buildDocument({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+      databaseId: database.id,
+      parentDocumentId: parent.id,
+    });
+
+    const res = await server.post("/api/documents.move", user, {
+      body: { id: subItem.id, parentDocumentId: database.id },
+    });
+    expect(res.status).toEqual(200);
+
+    await subItem.reload();
+    expect(subItem.parentDocumentId).toEqual(null);
+    expect(subItem.databaseId).toEqual(database.id);
+  });
+
   it("should refuse to move a database inside another database", async () => {
     const { team, user, collection } = await buildEnabledTeam();
     const database = await buildDatabase({
