@@ -678,6 +678,94 @@ describe("#databases.move_row", () => {
     expect(row.databaseIndex).toEqual("Q");
   });
 
+  it("should move the row's node to match the new order", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+
+    const createRow = async (title: string) => {
+      const res = await server.post("/api/documents.create", user, {
+        body: {
+          title,
+          collectionId: collection.id,
+          databaseId: database.id,
+          publish: true,
+        },
+      });
+      const body = await res.json();
+      return body.data.id as string;
+    };
+    const first = await createRow("First");
+    const second = await createRow("Second");
+
+    await collection.reload();
+    const anchorNode = () =>
+      collection.documentStructure?.find((node) => node.id === database.id);
+    expect(anchorNode()?.children.map((child) => child.id)).toEqual([
+      first,
+      second,
+    ]);
+
+    // "!" sorts before any index the server hands out, so the second row is
+    // dragged to the front of the database
+    const res = await server.post("/api/databases.move_row", user, {
+      body: { id: database.id, documentId: second, index: "!" },
+    });
+    expect(res.status).toEqual(200);
+
+    await collection.reload();
+    expect(anchorNode()?.children.map((child) => child.id)).toEqual([
+      second,
+      first,
+    ]);
+  });
+
+  it("should nest the row's node under its new parent row", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const database = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+
+    const createRow = async (title: string) => {
+      const res = await server.post("/api/documents.create", user, {
+        body: {
+          title,
+          collectionId: collection.id,
+          databaseId: database.id,
+          publish: true,
+        },
+      });
+      const body = await res.json();
+      return body.data.id as string;
+    };
+    const parent = await createRow("Parent");
+    const child = await createRow("Child");
+
+    const res = await server.post("/api/databases.move_row", user, {
+      body: {
+        id: database.id,
+        documentId: child,
+        parentDocumentId: parent,
+        index: "z",
+      },
+    });
+    expect(res.status).toEqual(200);
+
+    await collection.reload();
+    const anchorNode = collection.documentStructure?.find(
+      (node) => node.id === database.id
+    );
+    expect(anchorNode?.children.map((node) => node.id)).toEqual([parent]);
+    expect(anchorNode?.children[0].children.map((node) => node.id)).toEqual([
+      child,
+    ]);
+  });
+
   it("should order a row that has never been ordered", async () => {
     const { team, user, collection } = await buildEnabledTeam();
     const database = await buildDatabase({

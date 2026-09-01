@@ -885,6 +885,78 @@ class Collection extends ParanoidModel<
     await document.destroy(options);
   };
 
+  /**
+   * Moves the node of a database row to the place its database now arranges it
+   * in: under the row it is nested in, or under the document its database is
+   * anchored on. Nested documents sitting beside the rows keep their places.
+   *
+   * @param document The row that moved
+   * @param options The transaction to read and write within, if any
+   */
+  moveRowInStructure = async (
+    document: Document,
+    options?: { transaction?: Transaction }
+  ) => {
+    if (!document.databaseId || !this.documentStructure) {
+      return this;
+    }
+
+    // the node is taken out and put back rather than edited in place, so the
+    // sub-items hanging under it travel with it
+    const removed = await this.removeDocumentInStructure(document, {
+      ...options,
+      save: false,
+    });
+
+    return this.addDocumentToStructure(document, undefined, {
+      ...options,
+      documentJson: removed?.[0],
+    });
+  };
+
+  /**
+   * Works out where a row's node belongs among the children of the node it
+   * hangs under: in front of the first sibling row that sorts after it, so the
+   * tree reads in the order the database arranges its rows.
+   */
+  private rowInsertionIndex = async (
+    document: Document,
+    parentId: string | undefined,
+    options?: FindOptions
+  ): Promise<number | undefined> => {
+    if (!parentId) {
+      return undefined;
+    }
+
+    const siblings = await Document.unscoped().findAll({
+      attributes: ["id", "databaseIndex"],
+      where: {
+        databaseId: document.databaseId,
+        parentDocumentId: document.parentDocumentId ?? null,
+        id: { [Op.ne]: document.id },
+        deletedAt: null,
+        archivedAt: null,
+        publishedAt: { [Op.ne]: null },
+      },
+      order: [
+        [Sequelize.literal(`"databaseIndex" collate "C"`), "ASC"],
+        ["createdAt", "ASC"],
+      ],
+      transaction: options?.transaction,
+    });
+
+    const index = document.databaseIndex ?? "";
+    const next = siblings.find(
+      (sibling) => (sibling.databaseIndex ?? "") > index
+    );
+    const children = this.getDocumentTree(parentId)?.children ?? [];
+    const position = next
+      ? children.findIndex((child) => child.id === next.id)
+      : -1;
+
+    return position === -1 ? children.length : position;
+  };
+
   removeDocumentInStructure = async (
     document: Document,
     options?: FindOptions & {
@@ -1024,11 +1096,6 @@ class Collection extends ParanoidModel<
       insertOrder?: "prepend" | "append";
     } = {}
   ) => {
-    // database rows are reached through their database, not the sidebar tree
-    if (document.databaseId) {
-      return this;
-    }
-
     if (!this.documentStructure) {
       this.documentStructure = [];
     }
@@ -1043,10 +1110,23 @@ class Collection extends ParanoidModel<
       ...options.documentJson,
     };
 
+    // a top-level row hangs under the document its database is anchored on,
+    // which is the parent it has in the tree even though it has no
+    // parentDocumentId — that field nests one row under another
+    const parentId = document.parentDocumentId ?? document.databaseId;
+
+    // a row goes wherever its database arranges it, whatever the caller asked
+    // for: the tree is read in the same order the table lists the rows
+    const rowIndex = document.databaseId
+      ? await this.rowInsertionIndex(document, parentId ?? undefined, options)
+      : undefined;
+
     // Determine the insertion index based on order parameter or explicit index
     let insertionIndex: number;
 
-    if (index !== undefined) {
+    if (rowIndex !== undefined) {
+      insertionIndex = rowIndex;
+    } else if (index !== undefined) {
       // Explicit index takes precedence
       insertionIndex = index;
     } else if (options.insertOrder === "prepend") {
@@ -1057,7 +1137,7 @@ class Collection extends ParanoidModel<
       insertionIndex = this.documentStructure.length;
     }
 
-    if (!document.parentDocumentId) {
+    if (!parentId) {
       // Note: Index is supported on DB level but it's being ignored
       // by the API presentation until we build product support for it.
       this.documentStructure.splice(insertionIndex, 0, documentJson);
@@ -1065,13 +1145,15 @@ class Collection extends ParanoidModel<
       // Recursively place document
       const placeDocument = (documentList: NavigationNode[]) =>
         documentList.map((childDocument) => {
-          if (document.parentDocumentId === childDocument.id) {
+          if (parentId === childDocument.id) {
             const childInsertionIndex =
-              index !== undefined
-                ? index
-                : options.insertOrder === "prepend"
-                  ? 0
-                  : childDocument.children.length;
+              rowIndex !== undefined
+                ? rowIndex
+                : index !== undefined
+                  ? index
+                  : options.insertOrder === "prepend"
+                    ? 0
+                    : childDocument.children.length;
             childDocument.children.splice(childInsertionIndex, 0, documentJson);
           } else {
             childDocument.children = placeDocument(childDocument.children);

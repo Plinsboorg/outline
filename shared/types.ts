@@ -494,6 +494,11 @@ export type NavigationNode = {
   children: NavigationNode[];
   isDraft?: boolean;
   collectionId?: string;
+  /**
+   * Set when the node is a row of a database, so a tree can tell rows from
+   * ordinary child documents without loading either.
+   */
+  databaseId?: string;
   type?: NavigationNodeType;
   parent?: NavigationNode | null;
   depth?: number;

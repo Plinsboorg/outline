@@ -1534,6 +1534,17 @@ class Document extends ArchivableModel<
   toNavigationNode = async (
     options?: FindOptions<Document> & { includeArchived?: boolean }
   ): Promise<NavigationNode> => {
+    // a document is a parent in the tree through two edges: the ordinary
+    // parentDocumentId of a nested document, and the databaseId of a row, whose
+    // database is anchored on this document. Sub-items carry both and are
+    // reached through their parent row alone.
+    const childrenOf = {
+      [Op.or]: [
+        { parentDocumentId: this.id },
+        { databaseId: this.id, parentDocumentId: { [Op.is]: null } },
+      ],
+    };
+
     // Checking if the record is new is a performance optimization – new docs cannot have children
     const childDocuments = this.isNewRecord
       ? []
@@ -1541,14 +1552,14 @@ class Document extends ArchivableModel<
           where: options?.includeArchived
             ? {
                 teamId: this.teamId,
-                parentDocumentId: this.id,
+                ...childrenOf,
                 publishedAt: {
                   [Op.ne]: null,
                 },
               }
             : {
                 teamId: this.teamId,
-                parentDocumentId: this.id,
+                ...childrenOf,
                 publishedAt: {
                   [Op.ne]: null,
                 },
@@ -1556,6 +1567,12 @@ class Document extends ArchivableModel<
                   [Op.is]: null,
                 },
               },
+          // rows read in the order their database arranges them; ordinary
+          // child documents are arranged by the structure they sit in
+          order: [
+            [Sequelize.literal(`"databaseIndex" collate "C"`), "ASC"],
+            ["createdAt", "ASC"],
+          ],
           transaction: options?.transaction,
         });
 
@@ -1569,6 +1586,7 @@ class Document extends ArchivableModel<
       url: this.url,
       icon: isNil(this.icon) ? undefined : this.icon,
       color: isNil(this.color) ? undefined : this.color,
+      databaseId: isNil(this.databaseId) ? undefined : this.databaseId,
       children,
     };
   };

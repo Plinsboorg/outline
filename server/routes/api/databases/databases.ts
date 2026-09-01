@@ -12,7 +12,7 @@ import documentCreator, {
   authorizeDocumentCreate,
 } from "@server/commands/documentCreator";
 import type { User } from "@server/models";
-import { Database, Document } from "@server/models";
+import { Collection, Database, Document } from "@server/models";
 import { RelationHelper } from "@server/models/helpers/RelationHelper";
 import { authorize } from "@server/policies";
 import { presentDatabase, presentPolicies } from "@server/presenters";
@@ -341,6 +341,16 @@ router.post(
 
     document.databaseIndex = index;
     await document.save({ transaction, silent: true, hooks: false });
+
+    // rows are part of the document structure, so the tree has to be told
+    // where this one went — otherwise it would read in the old order
+    if (document.collectionId) {
+      const collection = await Collection.findByPk(document.collectionId, {
+        transaction,
+        includeDocumentStructure: true,
+      });
+      await collection?.moveRowInStructure(document, { transaction });
+    }
 
     ctx.body = {
       success: true,

@@ -69,7 +69,7 @@ const DocumentLink = observer(function DocumentLink(props: Props) {
   // rows are listed beneath it the way child documents would be
   const database = databases.get(node.id);
   const hasChildDocuments =
-    !!node.children.length ||
+    node.children.some((child) => !child.databaseId) ||
     activeDocument?.parentDocumentId === node.id ||
     !!database;
   const sidebarContext = useSidebarContext();
@@ -109,16 +109,25 @@ const DocumentLink = observer(function DocumentLink(props: Props) {
     ? activeDocument?.asNavigationNode
     : undefined;
 
+  // rows sit in the document structure so that everything reading the tree
+  // sees them, but here they are listed by DatabaseRowLinks instead — it keeps
+  // them in the order the database arranges them, and rendering them from both
+  // places would show every row twice
+  const childDocuments = React.useMemo(
+    () => node.children.filter((child) => !child.databaseId),
+    [node.children]
+  );
+
   const nodeChildren = React.useMemo(
     () =>
       collection && draftNavNode
         ? sortNavigationNodes(
-            [draftNavNode, ...node.children],
+            [draftNavNode, ...childDocuments],
             collection.sort,
             false
           )
-        : node.children,
-    [draftNavNode, collection, node.children]
+        : childDocuments,
+    [draftNavNode, collection, childDocuments]
   );
 
   // Visibility gate: only mount the heavy inner content when scrolled near the

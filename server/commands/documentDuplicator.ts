@@ -241,9 +241,10 @@ async function duplicateRows(
       color: row.color,
       fullWidth: row.fullWidth,
       title: row.title,
-      content: ProsemirrorHelper.removeMarks(DocumentHelper.toProsemirror(row), [
-        "comment",
-      ]),
+      content: ProsemirrorHelper.removeMarks(
+        DocumentHelper.toProsemirror(row),
+        ["comment"]
+      ),
       sourceMetadata: {
         ...row.sourceMetadata,
         originalDocumentId: row.id,

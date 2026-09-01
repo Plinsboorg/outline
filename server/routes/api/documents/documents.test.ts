@@ -3525,11 +3525,17 @@ describe("#documents.create", () => {
     expect(body.data.databaseId).toEqual(database.id);
     expect(body.data.collectionId).toEqual(collection.id);
 
-    // rows must not appear in the collection's sidebar structure
+    // a row belongs to the tree under the document its database is anchored
+    // on, never at the root of the collection
     await collection.reload();
     expect(
       collection.documentStructure?.some((node) => node.id === body.data.id)
     ).not.toEqual(true);
+    const anchor = collection.documentStructure?.find(
+      (node) => node.id === database.id
+    );
+    expect(anchor?.children.map((child) => child.id)).toEqual([body.data.id]);
+    expect(anchor?.children[0].databaseId).toEqual(database.id);
   });
 
   it("should store property values passed when creating a row", async () => {

@@ -4,16 +4,15 @@ import type { NavigationNode } from "@shared/types";
 
 /**
  * Computes the set of node IDs along the path from any node in `roots` down
- * to a node with `targetId`. The target itself is included only when the tree
- * knows of children to reveal beneath it — expanding a node with none shows
- * nothing, and a database's rows are not part of the structure, so opening one
- * would otherwise empty its whole table into the sidebar. Returns an empty
- * array when no path exists.
+ * to a node with `targetId`. The target itself is included only when there is
+ * something worth revealing beneath it: expanding a node with no children
+ * shows nothing, and expanding a database empties its whole table of rows into
+ * the sidebar. Returns an empty array when no path exists.
  *
  * @param roots the top-level navigation nodes to search through.
  * @param targetId the id of the target document.
- * @returns array of ancestor IDs (inclusive of the target when it has
- * children).
+ * @returns array of ancestor IDs (inclusive of the target when it has children
+ * that are not rows).
  */
 function computeAncestorPath(
   roots: NavigationNode[],
@@ -26,7 +25,9 @@ function computeAncestorPath(
       stack.push(node.id);
       if (node.id === targetId) {
         found = true;
-        if (!node.children.length) {
+        // a node holding rows is a database: opening it should not unfold
+        // every row of its table into the nav
+        if (!node.children.some((child) => !child.databaseId)) {
           stack.pop();
         }
         return true;
