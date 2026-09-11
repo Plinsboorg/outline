@@ -794,6 +794,7 @@ function DatabaseView({ database }: Props) {
           properties={visibleProperties}
           titleIndex={titleIndex}
           titleName={database.titleName ?? undefined}
+          databaseId={database.id}
           onRenameTitle={can.update ? handleRenameTitle : undefined}
           onResizeColumn={can.update ? handleResizeColumn : undefined}
           onToggleWrapColumn={can.update ? handleToggleWrapColumn : undefined}

@@ -58,6 +58,8 @@ type Props = {
   titleIndex: number;
   /** The display name of the title column; undefined means "Title". */
   titleName?: string;
+  /** The database being shown, whose schema the columns come from. */
+  databaseId: string;
   /** Callback renaming the title column; absent when not allowed. */
   onRenameTitle?: (name: string) => void;
   /** Callback persisting a column's width; absent when not allowed. */
@@ -84,7 +86,10 @@ type Props = {
    * Rollup) that need configuration the quick-add menu can't offer. */
   onOpenSchemaEditor?: () => void;
   /** Callback merging updates into a property; absent when not allowed. */
-  onUpdateProperty?: (propertyId: string, updates: Partial<Property>) => void;
+  onUpdateProperty?: (
+    propertyId: string,
+    updates: Partial<Property>
+  ) => void | Promise<void>;
   /** Callback hiding a property from the active view. */
   onHideProperty: (propertyId: string) => void;
   /** Callback removing a property from the schema. */
@@ -135,6 +140,7 @@ function DatabaseTable({
   properties,
   titleIndex,
   titleName,
+  databaseId,
   onRenameTitle,
   onResizeColumn,
   onToggleWrapColumn,
@@ -242,6 +248,7 @@ function DatabaseTable({
   const headerCells = properties.map((property) => (
     <DatabaseTableHeader
       key={property.id}
+      databaseId={databaseId}
       property={property}
       sort={sort}
       onSetSort={onSetSort}
@@ -265,6 +272,7 @@ function DatabaseTable({
     0,
     <DatabaseTableTitleHeader
       key={TITLE_COLUMN_ID}
+      databaseId={databaseId}
       name={titleName}
       onRename={onRenameTitle}
       sort={sort}
@@ -291,6 +299,7 @@ function DatabaseTable({
           <Flex align="center" gap={2}>
             {onAddProperty && (
               <DatabaseAddProperty
+                databaseId={databaseId}
                 existingNames={schemaNames}
                 onAdd={onAddProperty}
                 onOpenSchemaEditor={onOpenSchemaEditor}
@@ -442,6 +451,7 @@ function DatabaseTable({
  * click, with a grip along the top edge to drag the column to a new position.
  */
 function DatabaseTableHeader({
+  databaseId,
   property,
   sort,
   onSetSort,
@@ -455,10 +465,14 @@ function DatabaseTableHeader({
   wrap,
   onToggleWrap,
 }: {
+  databaseId: string;
   property: Property;
   sort?: DataViewSort;
   onSetSort: (propertyId: string, direction: "asc" | "desc" | null) => void;
-  onUpdateProperty?: (propertyId: string, updates: Partial<Property>) => void;
+  onUpdateProperty?: (
+    propertyId: string,
+    updates: Partial<Property>
+  ) => void | Promise<void>;
   onHideProperty: (propertyId: string) => void;
   onDeleteProperty: (propertyId: string) => void;
   isSortable: boolean;
@@ -525,6 +539,7 @@ function DatabaseTableHeader({
       )}
       {onUpdateProperty ? (
         <DatabasePropertyMenu
+          databaseId={databaseId}
           property={property}
           sort={sort}
           onRename={(name) => onUpdateProperty(property.id, { name })}
@@ -585,6 +600,7 @@ function columnWidthStyle(width?: number): React.CSSProperties | undefined {
  * settings menu as a property column, reduced to rename and sort.
  */
 function DatabaseTableTitleHeader({
+  databaseId,
   name,
   onRename,
   sort,
@@ -596,6 +612,7 @@ function DatabaseTableTitleHeader({
   wrap,
   onToggleWrap,
 }: {
+  databaseId: string;
   name?: string;
   onRename?: (name: string) => void;
   sort?: DataViewSort;
@@ -672,6 +689,7 @@ function DatabaseTableTitleHeader({
       )}
       {onRename ? (
         <DatabasePropertyMenu
+          databaseId={databaseId}
           property={titleProperty}
           sort={sort}
           onRename={onRename}

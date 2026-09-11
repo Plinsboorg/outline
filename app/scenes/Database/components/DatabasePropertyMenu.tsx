@@ -2,13 +2,16 @@ import { observer } from "mobx-react";
 import {
   CheckmarkIcon,
   EyeIcon,
+  NextIcon,
   SortAscendingIcon,
   SortDescendingIcon,
+  TableIcon,
   TrashIcon,
 } from "outline-icons";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import styled from "styled-components";
+import { v4 as uuidv4 } from "uuid";
 import { s } from "@shared/styles";
 import type {
   DataViewSort,
@@ -17,6 +20,7 @@ import type {
   PropertyOption,
 } from "@shared/types";
 import { PropertyType } from "@shared/types";
+import { relationConfigForTarget } from "@shared/utils/properties";
 import { PropertyValidation } from "@shared/validations";
 import Switch from "~/components/Switch";
 import Text from "~/components/Text";
@@ -26,8 +30,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "~/components/primitives/Popover";
+import useStores from "~/hooks/useStores";
+import PropertyPickerStep from "./PropertyPickerStep";
 
 type Props = {
+  /** The database the property belongs to. */
+  databaseId: string;
   /** The property the menu configures. */
   property: Property;
   /** The view's active sort, to mark the active direction. */
@@ -42,7 +50,7 @@ type Props = {
   /** Callback when the property's options change. */
   onChangeOptions?: (options: PropertyOption[]) => void;
   /** Callback when the property's config changes, e.g. auto-numbering. */
-  onChangeConfig?: (config: PropertyConfig) => void;
+  onChangeConfig?: (config: PropertyConfig) => void | Promise<void>;
   /** Whether the column's cells wrap onto as many lines as they need. */
   wrap?: boolean;
   /** Callback when wrapping is toggled for the column; absent when not allowed. */
@@ -54,12 +62,23 @@ type Props = {
   children: React.ReactNode;
 };
 
+/** The steps the menu can show, beyond the menu itself. */
+type Step = "menu" | "target" | "view";
+
+/** The option standing for "do not limit which rows may be linked". */
+const ALL_ROWS = "all";
+
 /**
  * The settings menu of a table column, opened by clicking its header: rename
  * inline, sort the view, hide the property, edit select options and their
- * colors, or delete the property from the schema.
+ * colors, configure a relation, or delete the property from the schema.
+ *
+ * The choices that are a list of their own — the database a relation points
+ * at, the view it may link rows from — replace the menu with a step of their
+ * own rather than nesting a second popover inside it.
  */
 function DatabasePropertyMenu({
+  databaseId,
   property,
   sort,
   onRename,
@@ -73,7 +92,9 @@ function DatabasePropertyMenu({
   children,
 }: Props) {
   const { t } = useTranslation();
+  const { databases } = useStores();
   const [isOpen, setIsOpen] = React.useState(false);
+  const [step, setStep] = React.useState<Step>("menu");
   const [name, setName] = React.useState(property.name);
   const [prefix, setPrefix] = React.useState("");
   const [start, setStart] = React.useState("");
@@ -83,15 +104,29 @@ function DatabasePropertyMenu({
     property.type === PropertyType.MultiSelect;
   const supportsAutoNumber =
     property.type === PropertyType.Number && !!onChangeConfig;
+  const isRelation =
+    property.type === PropertyType.Relation && !!onChangeConfig;
   const isSortable =
     property.type !== PropertyType.Rollup &&
     property.type !== PropertyType.Image;
   const activeDirection =
     sort?.propertyId === property.id ? sort.direction : undefined;
 
+  const target = property.config?.targetDatabaseId
+    ? databases.get(property.config.targetDatabaseId)
+    : undefined;
+  const inversePropertyId = property.config?.inversePropertyId;
+  const backLinkName = inversePropertyId
+    ? target?.getProperty(inversePropertyId)?.name
+    : undefined;
+  const limitToView = property.config?.limitToViewId
+    ? target?.getView(property.config.limitToViewId)
+    : undefined;
+
   const handleOpenChange = (open: boolean) => {
     setIsOpen(open);
     if (open) {
+      setStep("menu");
       setName(property.name);
       setPrefix(property.config?.autoNumberPrefix ?? "");
       setStart(
@@ -104,7 +139,7 @@ function DatabasePropertyMenu({
 
   const handleAutoNumberCommit = () => {
     const parsedStart = Number.parseInt(start, 10);
-    onChangeConfig?.({
+    void onChangeConfig?.({
       ...property.config,
       autoNumberPrefix: prefix || undefined,
       autoNumberStart:
@@ -143,6 +178,78 @@ function DatabasePropertyMenu({
     setIsOpen(false);
   };
 
+  /**
+   * Reloads a database whose schema the server changed on our behalf, so that
+   * a mirror property it gained or lost is reflected without a page reload.
+   */
+  const refreshTarget = async (targetDatabaseId?: string) => {
+    if (!targetDatabaseId) {
+      return;
+    }
+    try {
+      await databases.fetch(targetDatabaseId, { force: true });
+    } catch (_err) {
+      // the related database may not be readable by this user — its mirror
+      // property is the server's business either way
+    }
+  };
+
+  const handleChangeTarget = async (targetDatabaseId: string) => {
+    const previousTargetId = property.config?.targetDatabaseId;
+    setStep("menu");
+    await onChangeConfig?.(
+      relationConfigForTarget(property.config, targetDatabaseId)
+    );
+    if (inversePropertyId) {
+      await refreshTarget(previousTargetId);
+      await refreshTarget(targetDatabaseId);
+    }
+  };
+
+  /**
+   * Turning on a back link mints the id the mirror property will use on the
+   * target database; turning it off drops it, and the server removes the
+   * mirror. Either way the target database is reloaded, since its schema
+   * changed too.
+   */
+  const handleToggleBackLink = async (checked: boolean) => {
+    await onChangeConfig?.({
+      ...property.config,
+      inversePropertyId: checked ? uuidv4() : undefined,
+    });
+    await refreshTarget(property.config?.targetDatabaseId);
+  };
+
+  const handleLimitToView = (viewId: string) => {
+    void onChangeConfig?.({
+      ...property.config,
+      limitToViewId: viewId === ALL_ROWS ? undefined : viewId,
+    });
+    setStep("menu");
+  };
+
+  // a relation may point back at its own database, so the list is not filtered
+  // down to the other databases
+  const targetOptions = databases.orderedData
+    .filter((database) => !database.isArchived || database.id === target?.id)
+    .map((database) => ({
+      value: database.id,
+      label:
+        database.id === databaseId
+          ? t("{{ databaseName }} (this database)", {
+              databaseName: database.name || t("Untitled"),
+            })
+          : database.name || t("Untitled"),
+    }));
+
+  const viewOptions = [
+    { value: ALL_ROWS, label: t("All rows") },
+    ...(target?.views ?? []).map((view) => ({
+      value: view.id,
+      label: view.name,
+    })),
+  ];
+
   return (
     <Popover open={isOpen} onOpenChange={handleOpenChange}>
       <PopoverTrigger>
@@ -156,120 +263,205 @@ function DatabasePropertyMenu({
         shrink
       >
         <Content>
-          <NameInput
-            type="text"
-            value={name}
-            placeholder={t("Property name")}
-            maxLength={PropertyValidation.maxNameLength}
-            onChange={(ev) => setName(ev.target.value)}
-            onKeyDown={handleNameKeyDown}
-            onBlur={handleRenameCommit}
-          />
-          {isSortable && (
+          {step === "target" ? (
+            <PropertyPickerStep
+              title={t("Related database")}
+              options={targetOptions}
+              value={property.config?.targetDatabaseId}
+              emptyMessage={t("There are no databases to relate to")}
+              onSelect={(value) => void handleChangeTarget(value)}
+              onBack={() => setStep("menu")}
+            />
+          ) : step === "view" ? (
+            <PropertyPickerStep
+              title={t("Rows that can be linked")}
+              options={viewOptions}
+              value={property.config?.limitToViewId ?? ALL_ROWS}
+              emptyMessage={t("The related database has no views")}
+              onSelect={handleLimitToView}
+              onBack={() => setStep("menu")}
+            />
+          ) : (
             <>
-              <MenuItem type="button" onClick={() => handleSort("asc")}>
-                <SortAscendingIcon />
-                {t("Sort ascending")}
-                {activeDirection === "asc" && <ActiveCheck />}
-              </MenuItem>
-              <MenuItem type="button" onClick={() => handleSort("desc")}>
-                <SortDescendingIcon />
-                {t("Sort descending")}
-                {activeDirection === "desc" && <ActiveCheck />}
-              </MenuItem>
-            </>
-          )}
-          {onHide && (
-            <MenuItem
-              type="button"
-              onClick={() => {
-                onHide();
-                setIsOpen(false);
-              }}
-            >
-              <EyeIcon />
-              {t("Hide in view")}
-            </MenuItem>
-          )}
-          {onToggleWrap && (
-            <SwitchPadding>
-              <Switch
-                label={t("Wrap text")}
-                labelPosition="right"
-                checked={!!wrap}
-                onChange={onToggleWrap}
-                inForm={false}
+              <NameInput
+                type="text"
+                value={name}
+                placeholder={t("Property name")}
+                maxLength={PropertyValidation.maxNameLength}
+                onChange={(ev) => setName(ev.target.value)}
+                onKeyDown={handleNameKeyDown}
+                onBlur={handleRenameCommit}
               />
-            </SwitchPadding>
-          )}
-          {supportsOptions && onChangeOptions && (
-            <>
-              <Separator />
-              <SectionLabel type="tertiary" size="xsmall">
-                {t("Options")}
-              </SectionLabel>
-              <PropertyOptionsEditor
-                options={property.options ?? []}
-                onChange={onChangeOptions}
-              />
-            </>
-          )}
-          {supportsAutoNumber && (
-            <>
-              <Separator />
-              <SectionLabel type="tertiary" size="xsmall">
-                {t("Auto-number")}
-              </SectionLabel>
-              <SwitchPadding>
-                <Switch
-                  label={t("Number rows automatically")}
-                  labelPosition="right"
-                  checked={!!property.config?.autoNumber}
-                  onChange={(checked) =>
-                    onChangeConfig?.({
-                      ...property.config,
-                      autoNumber: checked || undefined,
-                    })
-                  }
-                  inForm={false}
-                />
-              </SwitchPadding>
-              {property.config?.autoNumber && (
-                <AutoNumberRow>
-                  <SmallInput
-                    type="text"
-                    value={prefix}
-                    placeholder={t("Prefix")}
-                    maxLength={PropertyValidation.maxAutoNumberPrefixLength}
-                    onChange={(ev) => setPrefix(ev.target.value)}
-                    onBlur={handleAutoNumberCommit}
-                  />
-                  <SmallInput
-                    type="number"
-                    min={0}
-                    value={start}
-                    placeholder={t("Start at")}
-                    onChange={(ev) => setStart(ev.target.value)}
-                    onBlur={handleAutoNumberCommit}
-                  />
-                </AutoNumberRow>
+              {isSortable && (
+                <>
+                  <MenuItem type="button" onClick={() => handleSort("asc")}>
+                    <SortAscendingIcon />
+                    {t("Sort ascending")}
+                    {activeDirection === "asc" && <ActiveCheck />}
+                  </MenuItem>
+                  <MenuItem type="button" onClick={() => handleSort("desc")}>
+                    <SortDescendingIcon />
+                    {t("Sort descending")}
+                    {activeDirection === "desc" && <ActiveCheck />}
+                  </MenuItem>
+                </>
               )}
-            </>
-          )}
-          {onDelete && (
-            <>
-              <Separator />
-              <MenuItem
-                type="button"
-                $danger
-                onClick={() => {
-                  onDelete();
-                  setIsOpen(false);
-                }}
-              >
-                <TrashIcon />
-                {t("Delete property")}
-              </MenuItem>
+              {onHide && (
+                <MenuItem
+                  type="button"
+                  onClick={() => {
+                    onHide();
+                    setIsOpen(false);
+                  }}
+                >
+                  <EyeIcon />
+                  {t("Hide in view")}
+                </MenuItem>
+              )}
+              {onToggleWrap && (
+                <SwitchPadding>
+                  <Switch
+                    label={t("Wrap text")}
+                    labelPosition="right"
+                    checked={!!wrap}
+                    onChange={onToggleWrap}
+                    inForm={false}
+                  />
+                </SwitchPadding>
+              )}
+              {supportsOptions && onChangeOptions && (
+                <>
+                  <Separator />
+                  <SectionLabel type="tertiary" size="xsmall">
+                    {t("Options")}
+                  </SectionLabel>
+                  <PropertyOptionsEditor
+                    options={property.options ?? []}
+                    onChange={onChangeOptions}
+                  />
+                </>
+              )}
+              {supportsAutoNumber && (
+                <>
+                  <Separator />
+                  <SectionLabel type="tertiary" size="xsmall">
+                    {t("Auto-number")}
+                  </SectionLabel>
+                  <SwitchPadding>
+                    <Switch
+                      label={t("Number rows automatically")}
+                      labelPosition="right"
+                      checked={!!property.config?.autoNumber}
+                      onChange={(checked) =>
+                        onChangeConfig?.({
+                          ...property.config,
+                          autoNumber: checked || undefined,
+                        })
+                      }
+                      inForm={false}
+                    />
+                  </SwitchPadding>
+                  {property.config?.autoNumber && (
+                    <AutoNumberRow>
+                      <SmallInput
+                        type="text"
+                        value={prefix}
+                        placeholder={t("Prefix")}
+                        maxLength={PropertyValidation.maxAutoNumberPrefixLength}
+                        onChange={(ev) => setPrefix(ev.target.value)}
+                        onBlur={handleAutoNumberCommit}
+                      />
+                      <SmallInput
+                        type="number"
+                        min={0}
+                        value={start}
+                        placeholder={t("Start at")}
+                        onChange={(ev) => setStart(ev.target.value)}
+                        onBlur={handleAutoNumberCommit}
+                      />
+                    </AutoNumberRow>
+                  )}
+                </>
+              )}
+              {isRelation && (
+                <>
+                  <Separator />
+                  <SectionLabel type="tertiary" size="xsmall">
+                    {t("Relation")}
+                  </SectionLabel>
+                  <MenuItem type="button" onClick={() => setStep("target")}>
+                    <TableIcon />
+                    <ItemLabel>
+                      {target?.name || t("Choose a database")}
+                    </ItemLabel>
+                    <Chevron size={18} />
+                  </MenuItem>
+                  <SwitchPadding>
+                    <Switch
+                      label={t("Create a back link on the related database")}
+                      labelPosition="right"
+                      checked={!!inversePropertyId}
+                      onChange={(checked) => void handleToggleBackLink(checked)}
+                      disabled={!property.config?.targetDatabaseId}
+                      inForm={false}
+                    />
+                  </SwitchPadding>
+                  {!!backLinkName && (
+                    <Hint type="tertiary" size="xsmall">
+                      {t(
+                        "Shown on {{ databaseName }} as “{{ propertyName }}”",
+                        {
+                          databaseName: target?.name,
+                          propertyName: backLinkName,
+                        }
+                      )}
+                    </Hint>
+                  )}
+                  <SwitchPadding>
+                    <Switch
+                      label={t("Allow linking more than one row")}
+                      labelPosition="right"
+                      checked={property.config?.allowMultiple !== false}
+                      onChange={(checked) =>
+                        onChangeConfig?.({
+                          ...property.config,
+                          allowMultiple: checked,
+                        })
+                      }
+                      inForm={false}
+                    />
+                  </SwitchPadding>
+                  {!!target?.views?.length && (
+                    <MenuItem type="button" onClick={() => setStep("view")}>
+                      <EyeIcon />
+                      <ItemLabel>
+                        {limitToView
+                          ? t("Only rows in {{ viewName }}", {
+                              viewName: limitToView.name,
+                            })
+                          : t("Any row can be linked")}
+                      </ItemLabel>
+                      <Chevron size={18} />
+                    </MenuItem>
+                  )}
+                </>
+              )}
+              {onDelete && (
+                <>
+                  <Separator />
+                  <MenuItem
+                    type="button"
+                    $danger
+                    onClick={() => {
+                      onDelete();
+                      setIsOpen(false);
+                    }}
+                  >
+                    <TrashIcon />
+                    {t("Delete property")}
+                  </MenuItem>
+                </>
+              )}
             </>
           )}
         </Content>
@@ -280,6 +472,18 @@ function DatabasePropertyMenu({
 
 const ActiveCheck = styled(CheckmarkIcon)`
   margin-left: auto;
+`;
+
+const Chevron = styled(NextIcon)`
+  flex-shrink: 0;
+`;
+
+const ItemLabel = styled.span`
+  flex-grow: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 
 const Content = styled.div`
@@ -383,6 +587,11 @@ const SmallInput = styled.input`
 const SectionLabel = styled(Text)`
   display: block;
   margin: 0 0 4px;
+`;
+
+const Hint = styled(Text)`
+  display: block;
+  padding: 0 8px 4px;
 `;
 
 export default observer(DatabasePropertyMenu);

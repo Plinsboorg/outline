@@ -508,6 +508,25 @@ export function visiblePropertiesForView(
 }
 
 /**
+ * Builds the config of a relation property pointed at a new target database,
+ * keeping the settings that still apply. A limit to a saved view is dropped,
+ * since that view belongs to the database the relation no longer points at; a
+ * declared back link is kept, and the server moves the mirror property across
+ * to the new target.
+ *
+ * @param config the relation property's current config, if any.
+ * @param targetDatabaseId the database the relation should point at.
+ * @returns the config to save on the property.
+ */
+export function relationConfigForTarget(
+  config: PropertyConfig | undefined,
+  targetDatabaseId: string
+): PropertyConfig {
+  const { limitToViewId: _limitToViewId, ...rest } = config ?? {};
+  return { ...rest, targetDatabaseId };
+}
+
+/**
  * Builds a complete column list for a view: the title column and one entry
  * per schema property, in the view's current order, preserving each column's
  * existing settings. The title column keeps its stored position, defaulting

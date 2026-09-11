@@ -22,6 +22,7 @@ import { s } from "@shared/styles";
 import type { Property } from "@shared/types";
 import { PropertyType } from "@shared/types";
 import { errToString } from "@shared/utils/error";
+import { relationConfigForTarget } from "@shared/utils/properties";
 import NudeButton from "~/components/NudeButton";
 import Tooltip from "~/components/Tooltip";
 import {
@@ -29,20 +30,23 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "~/components/primitives/Popover";
+import useStores from "~/hooks/useStores";
+import PropertyPickerStep from "./PropertyPickerStep";
 
 type Props = {
+  /** The database the property is added to. */
+  databaseId: string;
   /** The names already used by the schema, to derive a unique default name. */
   existingNames: string[];
   /** Callback with the new property to append to the schema. */
   onAdd: (property: Property) => Promise<void>;
-  /** Callback opening the full schema editor, for Relation and Rollup —
-   * absent when the caller does not offer it (e.g. no update permission). */
+  /** Callback opening the full schema editor, for Rollup — absent when the
+   * caller does not offer it (e.g. no update permission). */
   onOpenSchemaEditor?: () => void;
 };
 
 /**
- * Property types that can be created directly from a view. Relations and
- * rollups need extra configuration and remain in the schema editor.
+ * Property types that can be created with nothing more than a name.
  */
 const simpleTypes: {
   type: PropertyType;
@@ -71,38 +75,47 @@ const simpleTypes: {
 /**
  * A "+" button opening a menu of property types. Clicking a simple type
  * immediately appends a property of that type, named after the type; it can
- * then be renamed by clicking the new column's header. Relation and Rollup
- * need configuration this quick menu can't offer, so they instead open the
- * full schema editor.
+ * then be renamed by clicking the new column's header.
+ *
+ * A relation cannot exist without a database to point at, so choosing it asks
+ * which one in a second step and names the column after it; everything else
+ * about the relation is then set from the column's own settings menu. Rollups
+ * need more than one choice up front and still open the full schema editor.
  */
 function DatabaseAddProperty({
+  databaseId,
   existingNames,
   onAdd,
   onOpenSchemaEditor,
 }: Props) {
   const { t } = useTranslation();
+  const { databases } = useStores();
   const [isOpen, setIsOpen] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isPickingTarget, setIsPickingTarget] = React.useState(false);
+
+  const handleOpenChange = (open: boolean) => {
+    setIsOpen(open);
+    if (open) {
+      setIsPickingTarget(false);
+    }
+  };
 
   const handleOpenSchemaEditor = () => {
     setIsOpen(false);
     onOpenSchemaEditor?.();
   };
 
-  const handleSelect = async (type: PropertyType, label: string) => {
+  const addProperty = async (property: Omit<Property, "id">) => {
     if (isSaving) {
       return;
     }
     setIsSaving(true);
     try {
       await onAdd({
+        ...property,
         id: uuidv4(),
-        name: uniqueName(t(label), existingNames),
-        type,
-        options:
-          type === PropertyType.Select || type === PropertyType.MultiSelect
-            ? []
-            : undefined,
+        name: uniqueName(property.name, existingNames),
       });
       setIsOpen(false);
     } catch (error) {
@@ -112,8 +125,42 @@ function DatabaseAddProperty({
     }
   };
 
+  const handleSelectType = (type: PropertyType, label: string) =>
+    addProperty({
+      name: t(label),
+      type,
+      options:
+        type === PropertyType.Select || type === PropertyType.MultiSelect
+          ? []
+          : undefined,
+    });
+
+  const handleSelectTarget = (targetDatabaseId: string) =>
+    addProperty({
+      name: databases.get(targetDatabaseId)?.name || t("Relation"),
+      type: PropertyType.Relation,
+      config: relationConfigForTarget(
+        { allowMultiple: true },
+        targetDatabaseId
+      ),
+    });
+
+  // a relation may point back at its own database, so the list is not filtered
+  // down to the other databases
+  const targetOptions = databases.orderedData
+    .filter((database) => !database.isArchived)
+    .map((database) => ({
+      value: database.id,
+      label:
+        database.id === databaseId
+          ? t("{{ databaseName }} (this database)", {
+              databaseName: database.name || t("Untitled"),
+            })
+          : database.name || t("Untitled"),
+    }));
+
   return (
-    <Popover open={isOpen} onOpenChange={setIsOpen}>
+    <Popover open={isOpen} onOpenChange={handleOpenChange}>
       <Tooltip content={t("Add property")}>
         <PopoverTrigger>
           <AddButton type="button" aria-label={t("Add property")} size={24}>
@@ -125,32 +172,46 @@ function DatabaseAddProperty({
         side="bottom"
         align="end"
         aria-label={t("Add property")}
-        width={180}
+        width={isPickingTarget ? 240 : 180}
         shrink
       >
         <Content>
-          {simpleTypes.map((item) => (
-            <TypeItem
-              key={item.type}
-              type="button"
-              onClick={() => void handleSelect(item.type, item.label)}
-              disabled={isSaving}
-            >
-              {item.icon}
-              {t(item.label)}
-            </TypeItem>
-          ))}
-          {onOpenSchemaEditor && (
+          {isPickingTarget ? (
+            <PropertyPickerStep
+              title={t("Relate to")}
+              options={targetOptions}
+              emptyMessage={t("There are no databases to relate to")}
+              onSelect={(value) => void handleSelectTarget(value)}
+              onBack={() => setIsPickingTarget(false)}
+            />
+          ) : (
             <>
+              {simpleTypes.map((item) => (
+                <TypeItem
+                  key={item.type}
+                  type="button"
+                  onClick={() => void handleSelectType(item.type, item.label)}
+                  disabled={isSaving}
+                >
+                  {item.icon}
+                  {t(item.label)}
+                </TypeItem>
+              ))}
               <Divider />
-              <TypeItem type="button" onClick={handleOpenSchemaEditor}>
+              <TypeItem
+                type="button"
+                onClick={() => setIsPickingTarget(true)}
+                disabled={isSaving}
+              >
                 <ShuffleIcon />
                 {t("Relation")}…
               </TypeItem>
-              <TypeItem type="button" onClick={handleOpenSchemaEditor}>
-                <SummaryIcon />
-                {t("Rollup")}…
-              </TypeItem>
+              {onOpenSchemaEditor && (
+                <TypeItem type="button" onClick={handleOpenSchemaEditor}>
+                  <SummaryIcon />
+                  {t("Rollup")}…
+                </TypeItem>
+              )}
             </>
           )}
         </Content>

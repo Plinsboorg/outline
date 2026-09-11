@@ -17,6 +17,7 @@ import {
   normalizedColumnsForView,
   orderedPropertiesForView,
   pruneFilterReferences,
+  relationConfigForTarget,
   validateDataSchema,
   validateDataViews,
   visiblePropertiesForView,
@@ -959,5 +960,35 @@ describe("pruneFilterReferences", () => {
         new Set([kept])
       )
     ).toBeUndefined();
+  });
+});
+
+describe("relationConfigForTarget", () => {
+  it("points a relation with no config at the target database", () => {
+    const targetDatabaseId = uuidv4();
+    expect(relationConfigForTarget(undefined, targetDatabaseId)).toEqual({
+      targetDatabaseId,
+    });
+  });
+
+  it("keeps the back link and other settings", () => {
+    const inversePropertyId = uuidv4();
+    const targetDatabaseId = uuidv4();
+    expect(
+      relationConfigForTarget(
+        { targetDatabaseId: uuidv4(), inversePropertyId, allowMultiple: false },
+        targetDatabaseId
+      )
+    ).toEqual({ targetDatabaseId, inversePropertyId, allowMultiple: false });
+  });
+
+  it("drops a limit to a view of the previous target", () => {
+    const targetDatabaseId = uuidv4();
+    expect(
+      relationConfigForTarget(
+        { targetDatabaseId: uuidv4(), limitToViewId: uuidv4() },
+        targetDatabaseId
+      )
+    ).toEqual({ targetDatabaseId });
   });
 });
