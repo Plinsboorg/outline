@@ -805,6 +805,7 @@ function DatabaseView({ database }: Props) {
           onNewRowDone={handleNewRowDone}
           schemaNames={schema.map((property) => property.name)}
           onAddProperty={can.update ? handleAddProperty : undefined}
+          onOpenSchemaEditor={can.update ? handleEditSchema : undefined}
           onUpdateProperty={can.update ? handleUpdateProperty : undefined}
           onHideProperty={(propertyId) =>
             handleToggleProperty(propertyId, false)

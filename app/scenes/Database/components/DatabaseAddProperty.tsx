@@ -8,6 +8,8 @@ import {
   ImageIcon,
   LinkIcon,
   PlusIcon,
+  ShuffleIcon,
+  SummaryIcon,
   TodoListIcon,
   UserIcon,
 } from "outline-icons";
@@ -33,6 +35,9 @@ type Props = {
   existingNames: string[];
   /** Callback with the new property to append to the schema. */
   onAdd: (property: Property) => Promise<void>;
+  /** Callback opening the full schema editor, for Relation and Rollup —
+   * absent when the caller does not offer it (e.g. no update permission). */
+  onOpenSchemaEditor?: () => void;
 };
 
 /**
@@ -64,14 +69,25 @@ const simpleTypes: {
 ];
 
 /**
- * A "+" button opening a menu of property types. Clicking a type immediately
- * appends a property of that type, named after the type; it can then be
- * renamed by clicking the new column's header.
+ * A "+" button opening a menu of property types. Clicking a simple type
+ * immediately appends a property of that type, named after the type; it can
+ * then be renamed by clicking the new column's header. Relation and Rollup
+ * need configuration this quick menu can't offer, so they instead open the
+ * full schema editor.
  */
-function DatabaseAddProperty({ existingNames, onAdd }: Props) {
+function DatabaseAddProperty({
+  existingNames,
+  onAdd,
+  onOpenSchemaEditor,
+}: Props) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
+
+  const handleOpenSchemaEditor = () => {
+    setIsOpen(false);
+    onOpenSchemaEditor?.();
+  };
 
   const handleSelect = async (type: PropertyType, label: string) => {
     if (isSaving) {
@@ -124,6 +140,19 @@ function DatabaseAddProperty({ existingNames, onAdd }: Props) {
               {t(item.label)}
             </TypeItem>
           ))}
+          {onOpenSchemaEditor && (
+            <>
+              <Divider />
+              <TypeItem type="button" onClick={handleOpenSchemaEditor}>
+                <ShuffleIcon />
+                {t("Relation")}…
+              </TypeItem>
+              <TypeItem type="button" onClick={handleOpenSchemaEditor}>
+                <SummaryIcon />
+                {t("Rollup")}…
+              </TypeItem>
+            </>
+          )}
         </Content>
       </PopoverContent>
     </Popover>
@@ -150,6 +179,12 @@ function uniqueName(base: string, existingNames: string[]): string {
 
 const Content = styled.div`
   padding: 0 6px;
+`;
+
+const Divider = styled.hr`
+  border: 0;
+  border-top: 1px solid ${s("divider")};
+  margin: 4px 0;
 `;
 
 const AddButton = styled(NudeButton)`

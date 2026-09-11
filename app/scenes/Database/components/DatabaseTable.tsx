@@ -80,6 +80,9 @@ type Props = {
   schemaNames: string[];
   /** Callback to append a property to the schema; absent when not allowed. */
   onAddProperty?: (property: Property) => Promise<void>;
+  /** Callback opening the full schema editor, for property types (Relation,
+   * Rollup) that need configuration the quick-add menu can't offer. */
+  onOpenSchemaEditor?: () => void;
   /** Callback merging updates into a property; absent when not allowed. */
   onUpdateProperty?: (propertyId: string, updates: Partial<Property>) => void;
   /** Callback hiding a property from the active view. */
@@ -143,6 +146,7 @@ function DatabaseTable({
   onNewRowDone,
   schemaNames,
   onAddProperty,
+  onOpenSchemaEditor,
   onUpdateProperty,
   onHideProperty,
   onDeleteProperty,
@@ -289,6 +293,7 @@ function DatabaseTable({
               <DatabaseAddProperty
                 existingNames={schemaNames}
                 onAdd={onAddProperty}
+                onOpenSchemaEditor={onOpenSchemaEditor}
               />
             )}
             {propertiesToggle}
