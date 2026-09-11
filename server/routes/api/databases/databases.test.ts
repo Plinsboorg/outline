@@ -6,7 +6,7 @@ import {
   PropertyType,
   RollupAggregation,
 } from "@shared/types";
-import { Database, Document, UserMembership } from "@server/models";
+import { Database, Document, Event, UserMembership } from "@server/models";
 import {
   buildAdmin,
   buildCollection,
@@ -632,6 +632,56 @@ describe("#databases.update", () => {
     expect(target.getProperty(inverseId)?.config?.targetDatabaseId).toEqual(
       source.id
     );
+  });
+
+  it("should broadcast the change to both databases without recording an event", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const source = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const target = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const scheduled = vi.spyOn(Event, "schedule");
+
+    try {
+      const res = await server.post("/api/databases.update", user, {
+        body: {
+          id: source.id,
+          dataSchema: [
+            {
+              id: randomUUID(),
+              name: "Linked",
+              type: PropertyType.Relation,
+              config: {
+                targetDatabaseId: target.id,
+                inversePropertyId: randomUUID(),
+              },
+            },
+          ],
+        },
+      });
+      expect(res.status).toEqual(200);
+
+      // both the edited database and the one that silently gained a mirror
+      const broadcast = scheduled.mock.calls
+        .map(([event]) => event)
+        .filter((event) => event?.name === "databases.update")
+        .map((event) => event?.modelId);
+      expect(broadcast).toContain(source.id);
+      expect(broadcast).toContain(target.id);
+
+      // schema edits are frequent; they do not belong in the audit log
+      expect(
+        await Event.count({ where: { name: "databases.update" } })
+      ).toEqual(0);
+    } finally {
+      scheduled.mockRestore();
+    }
   });
 
   it("should remove the mirror property when the relation is deleted", async () => {

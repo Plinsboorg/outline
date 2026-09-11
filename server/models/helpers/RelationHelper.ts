@@ -3,6 +3,7 @@ import type { Transaction } from "sequelize";
 import type { DocumentProperties, Property } from "@shared/types";
 import { PropertyType } from "@shared/types";
 import { ValidationError } from "@server/errors";
+import type { APIContext } from "@server/types";
 import Database from "@server/models/Database";
 import Document from "@server/models/Document";
 
@@ -41,14 +42,16 @@ export class RelationHelper {
    *
    * @param database The database whose schema changed, already holding the new schema
    * @param previousSchema The schema as it was before the change
-   * @param options Transaction to write within
+   * @param options Transaction to write within, and the request context to
+   *   raise events from — without it the target databases are saved silently,
+   *   and clients viewing them will not hear about their new schema
    */
   public static async syncInverseProperties(
     database: Database,
     previousSchema: Property[],
-    options: { transaction?: Transaction } = {}
+    options: { transaction?: Transaction; ctx?: APIContext } = {}
   ): Promise<void> {
-    const { transaction } = options;
+    const { transaction, ctx } = options;
     const current = this.bidirectionalRelations(database.dataSchema);
     const previous = this.bidirectionalRelations(previousSchema);
 
@@ -75,7 +78,7 @@ export class RelationHelper {
         continue;
       }
       target.removeProperty(property.config!.inversePropertyId!);
-      await this.persist(database, target, transaction);
+      await this.persist(database, target, transaction, ctx);
     }
 
     for (const property of current) {
@@ -127,7 +130,7 @@ export class RelationHelper {
           inversePropertyId: property.id,
         },
       });
-      await this.persist(database, target, transaction);
+      await this.persist(database, target, transaction, ctx);
     }
   }
 
@@ -258,9 +261,17 @@ export class RelationHelper {
   private static async persist(
     database: Database,
     target: Database,
-    transaction?: Transaction
+    transaction?: Transaction,
+    ctx?: APIContext
   ): Promise<void> {
-    if (target.id !== database.id) {
+    if (target.id === database.id) {
+      return;
+    }
+    if (ctx) {
+      // the mirror property is a schema change the target's own clients never
+      // asked for, so it is broadcast like any other update
+      await target.saveWithCtx(ctx, { transaction }, { persist: false });
+    } else {
       await target.save({ transaction });
     }
   }

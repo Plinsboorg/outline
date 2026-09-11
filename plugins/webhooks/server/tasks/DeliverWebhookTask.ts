@@ -293,6 +293,9 @@ export default class DeliverWebhookTask extends BaseTask<Props> {
       case "userMemberships.update":
         // Ignored
         return;
+      case "databases.update":
+        // Ignored — schema edits are broadcast to clients, not subscribers
+        return;
       case "imports.create":
       case "imports.update":
       case "imports.processed":

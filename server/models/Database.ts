@@ -31,6 +31,7 @@ import Document from "./Document";
 import Team from "./Team";
 import User from "./User";
 import ParanoidModel from "./base/ParanoidModel";
+import { SkipChangeset } from "./decorators/Changeset";
 
 /**
  * A database is a set of documents that share a typed property schema. It is
@@ -55,6 +56,9 @@ class Database extends ParanoidModel<
   titleName: string | null;
 
   /** The typed property definitions that describe this database's columns. */
+  // kept out of event changesets: both copies of the schema on every column
+  // resize would dwarf the event itself, and nothing reads them
+  @SkipChangeset
   @Default([])
   @Column({
     type: DataType.JSONB,
@@ -71,6 +75,7 @@ class Database extends ParanoidModel<
    * queries (filter + sorts) plus display configuration. A database may hold
    * several views of the same type, each with its own name.
    */
+  @SkipChangeset
   @Default([])
   @Column({
     type: DataType.JSONB,

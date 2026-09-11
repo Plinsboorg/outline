@@ -2,6 +2,7 @@ import { compact, concat, uniq, uniqBy } from "es-toolkit/compat";
 import type { Server } from "socket.io";
 import {
   Comment,
+  Database,
   Document,
   Collection,
   FileOperation,
@@ -22,6 +23,7 @@ import { cannot } from "@server/policies";
 import {
   presentComment,
   presentCollection,
+  presentDatabase,
   presentDocument,
   presentFileOperation,
   presentGroup,
@@ -322,6 +324,26 @@ export default class WebsocketsProcessor {
           documentId: event.documentId,
         });
         return;
+      }
+
+      case "databases.update": {
+        const database = await Database.findByPk(event.modelId, {
+          paranoid: false,
+        });
+        // a database's identity lives on the document it is anchored to, which
+        // also decides who may see it
+        const document = database
+          ? await Document.findByPk(database.id, { paranoid: false })
+          : null;
+        if (!database || !document) {
+          return;
+        }
+        database.document = document;
+
+        const channels = await this.getDocumentEventChannels(event, document);
+        return socketio
+          .to(channels)
+          .emit(event.name, presentDatabase(database));
       }
 
       case "collections.create": {

@@ -164,7 +164,10 @@ router.post(
       { transaction }
     );
 
-    await RelationHelper.syncInverseProperties(database, [], { transaction });
+    await RelationHelper.syncInverseProperties(database, [], {
+      transaction,
+      ctx,
+    });
 
     database.document = document;
 
@@ -224,11 +227,15 @@ router.post(
       throw ValidationError(errToString(error));
     }
 
-    await database.save({ transaction });
+    // saved through the context so that clients viewing this database hear
+    // about the change; the event is queued for the socket, not persisted to
+    // the audit log, which schema edits would otherwise flood
+    await database.saveWithCtx(ctx, { transaction }, { persist: false });
 
     if (dataSchema !== undefined) {
       await RelationHelper.syncInverseProperties(database, previousSchema, {
         transaction,
+        ctx,
       });
 
       // enabling auto-numbering numbers the rows that exist already, so the

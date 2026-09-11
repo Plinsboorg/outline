@@ -34,6 +34,7 @@ import type {
   Group,
   Integration,
   Comment,
+  Database,
   Subscription,
   View,
   Notification,
@@ -372,6 +373,11 @@ export type PinEvent = BaseEvent<Pin> & {
   collectionId?: string;
 };
 
+export type DatabaseEvent = BaseEvent<Database> & {
+  name: "databases.update";
+  modelId: string;
+};
+
 export type CommentUpdateEvent = BaseEvent<Comment> & {
   name: "comments.update";
   modelId: string;
@@ -502,6 +508,7 @@ export type Event =
   | StarEvent
   | CollectionEvent
   | CollectionUserEvent
+  | DatabaseEvent
   | CollectionGroupEvent
   | FileOperationEvent
   | IntegrationEvent

@@ -17,6 +17,7 @@ import { toError } from "@shared/utils/error";
 import type RootStore from "~/stores/RootStore";
 import type Collection from "~/models/Collection";
 import type Comment from "~/models/Comment";
+import type Database from "~/models/Database";
 import type Document from "~/models/Document";
 import type FileOperation from "~/models/FileOperation";
 import type Group from "~/models/Group";
@@ -387,6 +388,19 @@ function useDocumentHandlers() {
         groupMemberships.remove(event.id);
       }
     );
+  };
+}
+
+function useDatabaseHandlers() {
+  const { databases } = useStores();
+
+  return (socket: SocketWithAuthentication) => {
+    // a database's schema can change without this client asking: the server
+    // maintains the mirror property of a two-way relation on the database it
+    // points at
+    socket.on("databases.update", (event: PartialExcept<Database, "id">) => {
+      databases.add(event);
+    });
   };
 }
 
@@ -819,6 +833,7 @@ function WebsocketProvider({ children }: React.PropsWithChildren<object>) {
   const registerEntityHandlers = useEntityHandlers();
   const registerDocumentHandlers = useDocumentHandlers();
   const registerCollectionHandlers = useCollectionHandlers();
+  const registerDatabaseHandlers = useDatabaseHandlers();
   const registerCommentHandlers = useCommentHandlers();
   const registerGroupHandlers = useGroupHandlers();
   const registerTeamHandlers = useTeamHandlers();
@@ -847,6 +862,7 @@ function WebsocketProvider({ children }: React.PropsWithChildren<object>) {
       registerEntityHandlers(currentSocket);
       registerDocumentHandlers(currentSocket);
       registerCollectionHandlers(currentSocket);
+      registerDatabaseHandlers(currentSocket);
       registerCommentHandlers(currentSocket);
       registerGroupHandlers(currentSocket);
       registerTeamHandlers(currentSocket);
