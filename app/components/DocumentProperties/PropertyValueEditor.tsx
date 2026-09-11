@@ -1,8 +1,9 @@
 import { observer } from "mobx-react";
+import { CheckmarkIcon } from "outline-icons";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import styled, { css } from "styled-components";
+import styled from "styled-components";
 import { propertyChipStyles } from "@shared/components/PropertyChip";
 import { s } from "@shared/styles";
 import type { Property, PropertyValue } from "@shared/types";
@@ -11,6 +12,11 @@ import { errToString } from "@shared/utils/error";
 import { sanitizeImageSrc, sanitizeUrl } from "@shared/utils/urls";
 import { Inner } from "~/components/Button";
 import { InputSelect } from "~/components/InputSelect";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "~/components/primitives/Popover";
 import Switch from "~/components/Switch";
 import useStores from "~/hooks/useStores";
 import { uploadFile } from "~/utils/files";
@@ -92,17 +98,6 @@ function PropertyValueEditor({
       }
     },
     []
-  );
-
-  const handleToggleOption = React.useCallback(
-    (optionId: string) => {
-      const current = Array.isArray(value) ? value : [];
-      const next = current.includes(optionId)
-        ? current.filter((id) => id !== optionId)
-        : [...current, optionId];
-      onChange(next.length === 0 ? null : next);
-    },
-    [onChange, value]
   );
 
   switch (property.type) {
@@ -250,30 +245,27 @@ function PropertyValueEditor({
     case PropertyType.MultiSelect: {
       const options = property.options ?? [];
       const selectedIds = Array.isArray(value) ? value : [];
+      if (readOnly) {
+        return (
+          <ChipList>
+            {selectedIds.map((id) => {
+              const option = options.find((item) => item.id === id);
+              return option ? (
+                <Chip key={id} $color={option.color}>
+                  {option.name}
+                </Chip>
+              ) : null;
+            })}
+            {selectedIds.length === 0 && <Placeholder>–</Placeholder>}
+          </ChipList>
+        );
+      }
       return (
-        <ChipList>
-          {options.map((option) => {
-            const selected = selectedIds.includes(option.id);
-            if (readOnly && !selected) {
-              return null;
-            }
-            return (
-              <ChipButton
-                key={option.id}
-                type="button"
-                $selected={selected}
-                $color={option.color}
-                onClick={
-                  readOnly ? undefined : () => handleToggleOption(option.id)
-                }
-                disabled={readOnly}
-              >
-                {option.name}
-              </ChipButton>
-            );
-          })}
-          {readOnly && selectedIds.length === 0 && <Placeholder>–</Placeholder>}
-        </ChipList>
+        <MultiSelectValueEditor
+          property={property}
+          selectedIds={selectedIds}
+          onChange={onChange}
+        />
       );
     }
 
@@ -499,6 +491,78 @@ function UrlCellEditor({
         {url}
       </UrlLink>
     </UrlLinkCell>
+  );
+}
+
+/**
+ * Edits a MultiSelect property value: the trigger shows only the selected
+ * options as chips (matching the read-only display), and clicking it opens a
+ * popover listing every option with a checkmark for the selected ones —
+ * mirroring how the Select property's dropdown behaves, but staying open
+ * across multiple toggles.
+ */
+function MultiSelectValueEditor({
+  property,
+  selectedIds,
+  onChange,
+}: {
+  property: Property;
+  selectedIds: string[];
+  onChange: (value: PropertyValue | null) => void;
+}) {
+  const { t } = useTranslation();
+  const options = property.options ?? [];
+
+  const handleToggle = (optionId: string) => {
+    const next = selectedIds.includes(optionId)
+      ? selectedIds.filter((id) => id !== optionId)
+      : [...selectedIds, optionId];
+    onChange(next.length === 0 ? null : next);
+  };
+
+  return (
+    <Popover>
+      <PopoverTrigger>
+        <MultiSelectTrigger type="button">
+          {selectedIds.length === 0 ? (
+            <Placeholder>{t("Empty")}</Placeholder>
+          ) : (
+            selectedIds.map((id) => {
+              const option = options.find((item) => item.id === id);
+              return option ? (
+                <Chip key={id} $color={option.color}>
+                  {option.name}
+                </Chip>
+              ) : null;
+            })
+          )}
+        </MultiSelectTrigger>
+      </PopoverTrigger>
+      <PopoverContent
+        side="bottom"
+        align="start"
+        aria-label={property.name}
+        width={220}
+        shrink
+      >
+        <OptionList>
+          {options.map((option) => {
+            const selected = selectedIds.includes(option.id);
+            return (
+              <OptionRow
+                key={option.id}
+                type="button"
+                onClick={() => handleToggle(option.id)}
+              >
+                <ColorDot $color={option.color} />
+                <OptionName>{option.name}</OptionName>
+                {selected && <CheckmarkIcon size={18} />}
+              </OptionRow>
+            );
+          })}
+        </OptionList>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -771,24 +835,55 @@ const ChipRemove = styled.button`
   }
 `;
 
-const ChipButton = styled.button<{ $selected: boolean; $color?: string }>`
-  ${propertyChipStyles}
-  // a transparent border on the selected state too, so toggling an option
-  // does not shift the chips beside it
+const MultiSelectTrigger = styled.button`
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
   border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  padding: 3px 6px;
   cursor: var(--pointer);
+  text-align: left;
 
-  ${(props) =>
-    !props.$selected &&
-    css`
-      background: none;
-      border-color: ${s("inputBorder")};
-      color: ${s("textSecondary")};
-    `}
-
-  &:disabled {
-    cursor: default;
+  &:hover {
+    border-color: ${s("inputBorder")};
   }
+`;
+
+const OptionList = styled.div`
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+`;
+
+const OptionRow = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 6px 8px;
+  border-radius: 4px;
+  color: ${s("text")};
+  font-size: 14px;
+  cursor: var(--pointer);
+  text-align: left;
+
+  &:hover {
+    background: ${s("backgroundSecondary")};
+  }
+`;
+
+const OptionName = styled.span`
+  flex-grow: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 
 export default observer(PropertyValueEditor);
