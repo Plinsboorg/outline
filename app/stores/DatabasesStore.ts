@@ -1,6 +1,7 @@
 import invariant from "invariant";
 import { action, computed, runInAction } from "mobx";
-import type { DataView, JSONObject } from "@shared/types";
+import type { DataView, JSONObject, Property } from "@shared/types";
+import { mirroredRelationTargetIds } from "@shared/utils/properties";
 import Database from "~/models/Database";
 import type Document from "~/models/Document";
 import type { Properties } from "~/types";
@@ -76,6 +77,44 @@ export default class DatabasesStore extends Store<Database> {
       (database) =>
         database.collectionId === collectionId && !database.isArchived
     );
+
+  /**
+   * Saves a database's property schema, then reloads the databases on the far
+   * side of any bidirectional relation.
+   *
+   * The server creates and removes those mirror properties itself and nothing
+   * broadcasts the change, so the local copy of a related database goes stale
+   * the moment a back link is added or dropped. That matters because a schema
+   * write sends the whole schema: writing from a stale copy would resurrect a
+   * mirror that was just deleted, or delete one that was just created.
+   *
+   * @param database the database whose schema to save.
+   * @param dataSchema the schema to save.
+   */
+  @action
+  saveSchema = async (
+    database: Database,
+    dataSchema: Property[]
+  ): Promise<void> => {
+    const affected = new Set([
+      ...mirroredRelationTargetIds(database.dataSchema ?? []),
+      ...mirroredRelationTargetIds(dataSchema),
+    ]);
+    affected.delete(database.id);
+
+    await database.save({ dataSchema });
+
+    await Promise.all(
+      Array.from(affected).map(async (id) => {
+        try {
+          await this.fetch(id, { force: true });
+        } catch (_err) {
+          // the related database may have gone or be unreadable — its mirror
+          // property is the server's business either way
+        }
+      })
+    );
+  };
 
   /**
    * Persists a change to one of a database's saved views, leaving the other

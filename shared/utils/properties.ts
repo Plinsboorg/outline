@@ -508,6 +508,30 @@ export function visiblePropertiesForView(
 }
 
 /**
+ * Returns the ids of the databases holding a mirror property for this schema —
+ * the target of every relation that declares a back link. The server maintains
+ * those mirrors itself, so these are the databases whose own schema changes as
+ * a side effect of writing this one.
+ *
+ * @param schema the data schema to scan.
+ * @returns the target database ids, without duplicates.
+ */
+export function mirroredRelationTargetIds(schema: Property[]): string[] {
+  const ids = new Set<string>();
+  for (const property of schema) {
+    const config = property.config;
+    if (
+      property.type === PropertyType.Relation &&
+      config?.targetDatabaseId &&
+      config.inversePropertyId
+    ) {
+      ids.add(config.targetDatabaseId);
+    }
+  }
+  return Array.from(ids);
+}
+
+/**
  * Builds the config of a relation property pointed at a new target database,
  * keeping the settings that still apply. A limit to a saved view is dropped,
  * since that view belongs to the database the relation no longer points at; a

@@ -148,15 +148,16 @@ function DatabaseSchemaEditor({ databaseId, onSubmit }: Props) {
     }
     setIsSaving(true);
     try {
-      await database.save({
-        dataSchema: draft.map((property) => ({
+      await databases.saveSchema(
+        database,
+        draft.map((property) => ({
           ...property,
           name: property.name.trim(),
           options: property.options
             ? dedupeOptions(property.options)
             : undefined,
-        })),
-      });
+        }))
+      );
       toast.success(t("Settings saved"));
       onSubmit();
     } catch (error) {

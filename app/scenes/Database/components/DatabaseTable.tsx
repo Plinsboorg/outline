@@ -86,10 +86,7 @@ type Props = {
    * Rollup) that need configuration the quick-add menu can't offer. */
   onOpenSchemaEditor?: () => void;
   /** Callback merging updates into a property; absent when not allowed. */
-  onUpdateProperty?: (
-    propertyId: string,
-    updates: Partial<Property>
-  ) => void | Promise<void>;
+  onUpdateProperty?: (propertyId: string, updates: Partial<Property>) => void;
   /** Callback hiding a property from the active view. */
   onHideProperty: (propertyId: string) => void;
   /** Callback removing a property from the schema. */
@@ -469,10 +466,7 @@ function DatabaseTableHeader({
   property: Property;
   sort?: DataViewSort;
   onSetSort: (propertyId: string, direction: "asc" | "desc" | null) => void;
-  onUpdateProperty?: (
-    propertyId: string,
-    updates: Partial<Property>
-  ) => void | Promise<void>;
+  onUpdateProperty?: (propertyId: string, updates: Partial<Property>) => void;
   onHideProperty: (propertyId: string) => void;
   onDeleteProperty: (propertyId: string) => void;
   isSortable: boolean;

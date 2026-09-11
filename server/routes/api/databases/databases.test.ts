@@ -634,6 +634,101 @@ describe("#databases.update", () => {
     );
   });
 
+  it("should remove the mirror property when the relation is deleted", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const source = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const target = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const relationId = randomUUID();
+    const inverseId = randomUUID();
+
+    await server.post("/api/databases.update", user, {
+      body: {
+        id: source.id,
+        dataSchema: [
+          {
+            id: relationId,
+            name: "Linked",
+            type: PropertyType.Relation,
+            config: {
+              targetDatabaseId: target.id,
+              inversePropertyId: inverseId,
+            },
+          },
+        ],
+      },
+    });
+    await target.reload();
+    expect(target.getProperty(inverseId)).toBeDefined();
+
+    // deleting the column in the UI sends the schema without the relation
+    const res = await server.post("/api/databases.update", user, {
+      body: { id: source.id, dataSchema: [] },
+    });
+    expect(res.status).toEqual(200);
+
+    await source.reload();
+    await target.reload();
+    expect(source.getProperty(relationId)).toBeUndefined();
+    expect(target.getProperty(inverseId)).toBeUndefined();
+    expect(
+      target.views.every((view) =>
+        view.columns.every((column) => column.propertyId !== inverseId)
+      )
+    ).toBe(true);
+  });
+
+  it("should remove both sides when the mirror property is deleted", async () => {
+    const { team, user, collection } = await buildEnabledTeam();
+    const source = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const target = await buildDatabase({
+      teamId: team.id,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const relationId = randomUUID();
+    const inverseId = randomUUID();
+
+    await server.post("/api/databases.update", user, {
+      body: {
+        id: source.id,
+        dataSchema: [
+          {
+            id: relationId,
+            name: "Linked",
+            type: PropertyType.Relation,
+            config: {
+              targetDatabaseId: target.id,
+              inversePropertyId: inverseId,
+            },
+          },
+        ],
+      },
+    });
+    await target.reload();
+
+    const res = await server.post("/api/databases.update", user, {
+      body: { id: target.id, dataSchema: [] },
+    });
+    expect(res.status).toEqual(200);
+
+    await source.reload();
+    await target.reload();
+    expect(target.getProperty(inverseId)).toBeUndefined();
+    expect(source.getProperty(relationId)).toBeUndefined();
+  });
+
   it("should require write access", async () => {
     const { team, user, collection } = await buildEnabledTeam();
     const database = await buildDatabase({

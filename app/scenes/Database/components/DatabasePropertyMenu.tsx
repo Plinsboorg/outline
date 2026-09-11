@@ -50,7 +50,7 @@ type Props = {
   /** Callback when the property's options change. */
   onChangeOptions?: (options: PropertyOption[]) => void;
   /** Callback when the property's config changes, e.g. auto-numbering. */
-  onChangeConfig?: (config: PropertyConfig) => void | Promise<void>;
+  onChangeConfig?: (config: PropertyConfig) => void;
   /** Whether the column's cells wrap onto as many lines as they need. */
   wrap?: boolean;
   /** Callback when wrapping is toggled for the column; absent when not allowed. */
@@ -139,7 +139,7 @@ function DatabasePropertyMenu({
 
   const handleAutoNumberCommit = () => {
     const parsedStart = Number.parseInt(start, 10);
-    void onChangeConfig?.({
+    onChangeConfig?.({
       ...property.config,
       autoNumberPrefix: prefix || undefined,
       autoNumberStart:
@@ -178,50 +178,27 @@ function DatabasePropertyMenu({
     setIsOpen(false);
   };
 
-  /**
-   * Reloads a database whose schema the server changed on our behalf, so that
-   * a mirror property it gained or lost is reflected without a page reload.
-   */
-  const refreshTarget = async (targetDatabaseId?: string) => {
-    if (!targetDatabaseId) {
-      return;
-    }
-    try {
-      await databases.fetch(targetDatabaseId, { force: true });
-    } catch (_err) {
-      // the related database may not be readable by this user — its mirror
-      // property is the server's business either way
-    }
-  };
-
-  const handleChangeTarget = async (targetDatabaseId: string) => {
-    const previousTargetId = property.config?.targetDatabaseId;
-    setStep("menu");
-    await onChangeConfig?.(
+  const handleChangeTarget = (targetDatabaseId: string) => {
+    onChangeConfig?.(
       relationConfigForTarget(property.config, targetDatabaseId)
     );
-    if (inversePropertyId) {
-      await refreshTarget(previousTargetId);
-      await refreshTarget(targetDatabaseId);
-    }
+    setStep("menu");
   };
 
   /**
    * Turning on a back link mints the id the mirror property will use on the
    * target database; turning it off drops it, and the server removes the
-   * mirror. Either way the target database is reloaded, since its schema
-   * changed too.
+   * mirror. Reloading the target database afterwards is the store's job.
    */
-  const handleToggleBackLink = async (checked: boolean) => {
-    await onChangeConfig?.({
+  const handleToggleBackLink = (checked: boolean) => {
+    onChangeConfig?.({
       ...property.config,
       inversePropertyId: checked ? uuidv4() : undefined,
     });
-    await refreshTarget(property.config?.targetDatabaseId);
   };
 
   const handleLimitToView = (viewId: string) => {
-    void onChangeConfig?.({
+    onChangeConfig?.({
       ...property.config,
       limitToViewId: viewId === ALL_ROWS ? undefined : viewId,
     });
@@ -269,7 +246,7 @@ function DatabasePropertyMenu({
               options={targetOptions}
               value={property.config?.targetDatabaseId}
               emptyMessage={t("There are no databases to relate to")}
-              onSelect={(value) => void handleChangeTarget(value)}
+              onSelect={handleChangeTarget}
               onBack={() => setStep("menu")}
             />
           ) : step === "view" ? (
@@ -401,7 +378,7 @@ function DatabasePropertyMenu({
                       label={t("Create a back link on the related database")}
                       labelPosition="right"
                       checked={!!inversePropertyId}
-                      onChange={(checked) => void handleToggleBackLink(checked)}
+                      onChange={handleToggleBackLink}
                       disabled={!property.config?.targetDatabaseId}
                       inForm={false}
                     />

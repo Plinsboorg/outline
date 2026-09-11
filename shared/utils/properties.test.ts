@@ -16,6 +16,7 @@ import {
   isGroupableProperty,
   normalizedColumnsForView,
   orderedPropertiesForView,
+  mirroredRelationTargetIds,
   pruneFilterReferences,
   relationConfigForTarget,
   validateDataSchema,
@@ -990,5 +991,55 @@ describe("relationConfigForTarget", () => {
         targetDatabaseId
       )
     ).toEqual({ targetDatabaseId });
+  });
+});
+
+describe("mirroredRelationTargetIds", () => {
+  const targetDatabaseId = uuidv4();
+
+  it("returns the target of a relation with a back link", () => {
+    expect(
+      mirroredRelationTargetIds([
+        textProperty,
+        {
+          id: uuidv4(),
+          name: "Customers",
+          type: PropertyType.Relation,
+          config: { targetDatabaseId, inversePropertyId: uuidv4() },
+        },
+      ])
+    ).toEqual([targetDatabaseId]);
+  });
+
+  it("ignores one-way relations", () => {
+    expect(
+      mirroredRelationTargetIds([
+        {
+          id: uuidv4(),
+          name: "Customers",
+          type: PropertyType.Relation,
+          config: { targetDatabaseId },
+        },
+      ])
+    ).toEqual([]);
+  });
+
+  it("returns each target once", () => {
+    expect(
+      mirroredRelationTargetIds([
+        {
+          id: uuidv4(),
+          name: "Customers",
+          type: PropertyType.Relation,
+          config: { targetDatabaseId, inversePropertyId: uuidv4() },
+        },
+        {
+          id: uuidv4(),
+          name: "Leads",
+          type: PropertyType.Relation,
+          config: { targetDatabaseId, inversePropertyId: uuidv4() },
+        },
+      ])
+    ).toEqual([targetDatabaseId]);
   });
 });

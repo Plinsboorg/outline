@@ -349,41 +349,44 @@ function DatabaseView({ database }: Props) {
 
   const handleAddProperty = React.useCallback(
     async (property: Property) => {
-      await database.save({
-        dataSchema: [...(database.dataSchema ?? []), property],
-      });
+      await databases.saveSchema(database, [
+        ...(database.dataSchema ?? []),
+        property,
+      ]);
     },
-    [database]
+    [databases, database]
   );
 
   const handleUpdateProperty = React.useCallback(
     async (propertyId: string, updates: Partial<Property>) => {
       try {
-        await database.save({
-          dataSchema: (database.dataSchema ?? []).map((property) =>
+        await databases.saveSchema(
+          database,
+          (database.dataSchema ?? []).map((property) =>
             property.id === propertyId ? { ...property, ...updates } : property
-          ),
-        });
+          )
+        );
       } catch (error) {
         toast.error(errToString(error));
       }
     },
-    [database]
+    [databases, database]
   );
 
   const handleDeleteProperty = React.useCallback(
     async (propertyId: string) => {
       try {
-        await database.save({
-          dataSchema: (database.dataSchema ?? []).filter(
+        await databases.saveSchema(
+          database,
+          (database.dataSchema ?? []).filter(
             (property) => property.id !== propertyId
-          ),
-        });
+          )
+        );
       } catch (error) {
         toast.error(errToString(error));
       }
     },
-    [database]
+    [databases, database]
   );
 
   const handleCreateView = React.useCallback(
