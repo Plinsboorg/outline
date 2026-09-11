@@ -14,6 +14,7 @@ import { InputSelect } from "~/components/InputSelect";
 import Switch from "~/components/Switch";
 import useStores from "~/hooks/useStores";
 import { uploadFile } from "~/utils/files";
+import PropertyTextEditor from "./PropertyTextEditor";
 
 const EMPTY_VALUE = "";
 
@@ -29,8 +30,8 @@ type Props = {
   /** The document the value belongs to, associating uploaded files with it. */
   documentId?: string;
   /**
-   * Whether the value may occupy as many lines as it needs. Text values render
-   * in a growing textarea rather than a single-line input.
+   * Whether the value may occupy as many lines as it needs. Text values allow
+   * multiple paragraphs rather than committing on Enter like a single line.
    */
   wrap?: boolean;
 };
@@ -107,24 +108,16 @@ function PropertyValueEditor({
   switch (property.type) {
     case PropertyType.Text: {
       const text = typeof value === "string" ? value : "";
-      if (wrap) {
-        return (
-          <AutoSizeTextArea
-            value={text}
-            placeholder={readOnly ? "–" : t("Empty")}
-            onBlur={handleTextCommit}
-            disabled={readOnly}
-          />
-        );
+      if (readOnly && !text) {
+        return <Placeholder>–</Placeholder>;
       }
       return (
-        <NudeInput
-          type="text"
-          defaultValue={text}
-          placeholder={readOnly ? "–" : t("Empty")}
-          onBlur={handleTextCommit}
-          onKeyDown={handleKeyDown}
-          disabled={readOnly}
+        <PropertyTextEditor
+          value={text}
+          placeholder={t("Empty")}
+          readOnly={readOnly}
+          wrap={wrap}
+          onChange={onChange}
         />
       );
     }
@@ -509,79 +502,6 @@ function UrlCellEditor({
   );
 }
 
-/**
- * A textarea that grows to fit its content, so a long text value is readable
- * in full rather than scrolling inside a one-line field. Editing is committed
- * on blur like the single-line editor; Enter inserts a line break.
- */
-function AutoSizeTextArea({
-  value,
-  placeholder,
-  disabled,
-  onBlur,
-}: {
-  value: string;
-  placeholder?: string;
-  disabled?: boolean;
-  onBlur: (ev: React.FocusEvent<HTMLTextAreaElement>) => void;
-}) {
-  const ref = React.useRef<HTMLTextAreaElement>(null);
-
-  const resize = React.useCallback(() => {
-    const element = ref.current;
-    if (!element) {
-      return;
-    }
-    // measured from a collapsed height, so the field shrinks again as content
-    // is removed rather than only ever growing
-    element.style.height = "auto";
-    element.style.height = `${element.scrollHeight}px`;
-  }, []);
-
-  // the field is uncontrolled while it has focus so typing is never
-  // interrupted, but it follows the value when changed elsewhere
-  React.useLayoutEffect(() => {
-    const element = ref.current;
-    if (element && document.activeElement !== element) {
-      element.value = value;
-    }
-    resize();
-  }, [value, resize]);
-
-  // the same text needs more lines in a narrower column, so the height is
-  // measured again whenever the field is given a new width — resizing a table
-  // column would otherwise leave its rows the wrong height
-  React.useEffect(() => {
-    const element = ref.current;
-    if (!element) {
-      return;
-    }
-    let lastWidth = element.clientWidth;
-    // only width matters: reacting to the height this callback itself sets
-    // would loop
-    const observer = new ResizeObserver(() => {
-      if (element.clientWidth !== lastWidth) {
-        lastWidth = element.clientWidth;
-        resize();
-      }
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [resize]);
-
-  return (
-    <NudeTextArea
-      ref={ref}
-      rows={1}
-      defaultValue={value}
-      placeholder={placeholder}
-      disabled={disabled}
-      onInput={resize}
-      onBlur={onBlur}
-    />
-  );
-}
-
 const RelationValueEditor = observer(function RelationValueEditor_({
   property,
   value,
@@ -735,38 +655,6 @@ const NudeInput = styled.input`
   min-width: 0;
   padding: 4px 6px;
   border-radius: 4px;
-
-  &:hover:not(:disabled),
-  &:focus:not(:disabled) {
-    background: ${s("backgroundSecondary")};
-  }
-
-  &::placeholder {
-    color: ${s("placeholder")};
-  }
-
-  &:disabled {
-    color: ${s("textSecondary")};
-  }
-`;
-
-const NudeTextArea = styled.textarea`
-  display: block;
-  border: 0;
-  outline: none;
-  background: none;
-  color: ${s("text")};
-  font: inherit;
-  font-size: 14px;
-  line-height: 1.4;
-  width: 100%;
-  min-width: 0;
-  padding: 4px 6px;
-  border-radius: 4px;
-  resize: none;
-  overflow: hidden;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 
   &:hover:not(:disabled),
   &:focus:not(:disabled) {
