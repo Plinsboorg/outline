@@ -127,6 +127,30 @@ describe("#databases.create", () => {
     });
     expect(res.status).toEqual(403);
   });
+
+  it("should broadcast a created database without recording an event", async () => {
+    const { user, collection } = await buildEnabledTeam();
+    const scheduled = vi.spyOn(Event, "schedule");
+
+    try {
+      const res = await server.post("/api/databases.create", user, {
+        body: { collectionId: collection.id, name: "Features" },
+      });
+      const body = await res.json();
+      expect(res.status).toEqual(200);
+
+      const broadcast = scheduled.mock.calls
+        .map(([event]) => event)
+        .filter((event) => event?.name === "databases.create")
+        .map((event) => event?.modelId);
+      expect(broadcast).toContain(body.data.id);
+      expect(
+        await Event.count({ where: { name: "databases.create" } })
+      ).toEqual(0);
+    } finally {
+      scheduled.mockRestore();
+    }
+  });
 });
 
 describe("#databases.list", () => {

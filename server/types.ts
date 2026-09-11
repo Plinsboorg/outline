@@ -374,8 +374,11 @@ export type PinEvent = BaseEvent<Pin> & {
 };
 
 export type DatabaseEvent = BaseEvent<Database> & {
-  name: "databases.update";
+  name: "databases.create" | "databases.update" | "databases.delete";
   modelId: string;
+  /** Set on delete, where the database and its anchor document are both gone
+   * and the collection is all that is left to address the event to. */
+  collectionId?: string | null;
 };
 
 export type CommentUpdateEvent = BaseEvent<Comment> & {

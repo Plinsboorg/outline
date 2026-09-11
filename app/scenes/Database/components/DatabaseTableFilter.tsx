@@ -3,7 +3,13 @@ import * as React from "react";
 import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import type { FilterCondition, Property, PropertyValue } from "@shared/types";
-import { FilterOperator, PropertyType } from "@shared/types";
+import { PropertyType } from "@shared/types";
+import {
+  defaultFilterValue,
+  filterOperatorLabels,
+  filterOperatorsForProperty,
+  isValuelessFilterOperator,
+} from "@shared/utils/properties";
 import Button from "~/components/Button";
 import Flex from "~/components/Flex";
 import { InputSelect } from "~/components/InputSelect";
@@ -19,80 +25,6 @@ type Props = {
 };
 
 const NONE = "";
-
-const operatorLabels: Record<FilterOperator, string> = {
-  [FilterOperator.Is]: "Is",
-  [FilterOperator.IsNot]: "Is not",
-  [FilterOperator.Contains]: "Contains",
-  [FilterOperator.DoesNotContain]: "Does not contain",
-  [FilterOperator.IsEmpty]: "Is empty",
-  [FilterOperator.IsNotEmpty]: "Is not empty",
-  [FilterOperator.Gt]: "Greater than",
-  [FilterOperator.Gte]: "At least",
-  [FilterOperator.Lt]: "Less than",
-  [FilterOperator.Lte]: "At most",
-  [FilterOperator.Before]: "Before",
-  [FilterOperator.After]: "After",
-  [FilterOperator.On]: "On",
-};
-
-function operatorsForType(type: PropertyType): FilterOperator[] {
-  switch (type) {
-    case PropertyType.Rollup:
-      // rollups are computed at read time and cannot be queried
-      return [];
-    case PropertyType.Relation:
-    case PropertyType.Image:
-      return [FilterOperator.IsEmpty, FilterOperator.IsNotEmpty];
-    case PropertyType.Select:
-    case PropertyType.Person:
-      return [
-        FilterOperator.Is,
-        FilterOperator.IsNot,
-        FilterOperator.IsEmpty,
-        FilterOperator.IsNotEmpty,
-      ];
-    case PropertyType.MultiSelect:
-      return [
-        FilterOperator.Contains,
-        FilterOperator.DoesNotContain,
-        FilterOperator.IsEmpty,
-        FilterOperator.IsNotEmpty,
-      ];
-    case PropertyType.Checkbox:
-      return [FilterOperator.Is];
-    case PropertyType.Number:
-      return [
-        FilterOperator.Is,
-        FilterOperator.Gt,
-        FilterOperator.Gte,
-        FilterOperator.Lt,
-        FilterOperator.Lte,
-        FilterOperator.IsEmpty,
-        FilterOperator.IsNotEmpty,
-      ];
-    case PropertyType.Date:
-      return [
-        FilterOperator.Before,
-        FilterOperator.After,
-        FilterOperator.On,
-        FilterOperator.IsEmpty,
-        FilterOperator.IsNotEmpty,
-      ];
-    default:
-      return [
-        FilterOperator.Contains,
-        FilterOperator.Is,
-        FilterOperator.IsEmpty,
-        FilterOperator.IsNotEmpty,
-      ];
-  }
-}
-
-const valuelessOperators = new Set<FilterOperator>([
-  FilterOperator.IsEmpty,
-  FilterOperator.IsNotEmpty,
-]);
 
 /**
  * A single-condition filter bar for the database table view: pick a
@@ -113,14 +45,14 @@ function DatabaseTableFilter({ schema, filter, onChange }: Props) {
     if (!next) {
       return;
     }
-    const operator = operatorsForType(next.type)[0];
+    const operator = filterOperatorsForProperty(next.type)[0];
     if (!operator) {
       return;
     }
     onChange({
       propertyId,
       operator,
-      value: defaultValue(next, operator),
+      value: defaultFilterValue(next, operator),
     });
   };
 
@@ -128,7 +60,7 @@ function DatabaseTableFilter({ schema, filter, onChange }: Props) {
     if (!filter || !property) {
       return;
     }
-    const operator = operatorsForType(property.type).find(
+    const operator = filterOperatorsForProperty(property.type).find(
       (item) => item === value
     );
     if (!operator) {
@@ -137,9 +69,9 @@ function DatabaseTableFilter({ schema, filter, onChange }: Props) {
     onChange({
       ...filter,
       operator,
-      value: valuelessOperators.has(operator)
+      value: isValuelessFilterOperator(operator)
         ? undefined
-        : (filter.value ?? defaultValue(property, operator)),
+        : (filter.value ?? defaultFilterValue(property, operator)),
     });
   };
 
@@ -151,7 +83,7 @@ function DatabaseTableFilter({ schema, filter, onChange }: Props) {
   };
 
   const renderValueInput = () => {
-    if (!filter || !property || valuelessOperators.has(filter.operator)) {
+    if (!filter || !property || isValuelessFilterOperator(filter.operator)) {
       return null;
     }
 
@@ -247,7 +179,7 @@ function DatabaseTableFilter({ schema, filter, onChange }: Props) {
         options={[
           { type: "item", label: t("No filter"), value: NONE },
           ...schema
-            .filter((item) => operatorsForType(item.type).length > 0)
+            .filter((item) => filterOperatorsForProperty(item.type).length > 0)
             .map((item) => ({
               type: "item" as const,
               label: item.name,
@@ -263,11 +195,13 @@ function DatabaseTableFilter({ schema, filter, onChange }: Props) {
       {filter && property && (
         <>
           <InputSelect
-            options={operatorsForType(property.type).map((operator) => ({
-              type: "item" as const,
-              label: t(operatorLabels[operator]),
-              value: operator,
-            }))}
+            options={filterOperatorsForProperty(property.type).map(
+              (operator) => ({
+                type: "item" as const,
+                label: t(filterOperatorLabels[operator]),
+                value: operator,
+              })
+            )}
             value={filter.operator}
             onChange={handleOperator}
             label={t("Operator")}
@@ -282,25 +216,6 @@ function DatabaseTableFilter({ schema, filter, onChange }: Props) {
       )}
     </Bar>
   );
-}
-
-function defaultValue(
-  property: Property,
-  operator: FilterOperator
-): PropertyValue | undefined {
-  if (valuelessOperators.has(operator)) {
-    return undefined;
-  }
-  if (property.type === PropertyType.Checkbox) {
-    return true;
-  }
-  if (
-    property.type === PropertyType.Select ||
-    property.type === PropertyType.MultiSelect
-  ) {
-    return property.options?.[0]?.id;
-  }
-  return undefined;
 }
 
 const Bar = styled(Flex)`

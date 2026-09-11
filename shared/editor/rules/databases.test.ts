@@ -1,4 +1,5 @@
 import markdownit from "markdown-it";
+import { FilterOperator } from "../../types";
 import databases, { databaseHref, parseDatabaseHref } from "./databases";
 
 const databaseId = "11111111-1111-4111-8111-111111111111";
@@ -12,27 +13,80 @@ describe("databaseHref", () => {
       databaseId,
       viewId: null,
       hiddenProperties: [],
+      filter: null,
+      columnWidths: {},
     });
     expect(parseDatabaseHref(databaseHref(databaseId, viewId))).toEqual({
       databaseId,
       viewId,
       hiddenProperties: [],
+      filter: null,
+      columnWidths: {},
     });
     expect(
       parseDatabaseHref(
-        databaseHref(databaseId, viewId, [propertyId, propertyId2])
+        databaseHref(databaseId, viewId, {
+          hiddenProperties: [propertyId, propertyId2],
+        })
       )
     ).toEqual({
       databaseId,
       viewId,
       hiddenProperties: [propertyId, propertyId2],
+      filter: null,
+      columnWidths: {},
     });
     expect(
-      parseDatabaseHref(databaseHref(databaseId, null, [propertyId]))
+      parseDatabaseHref(
+        databaseHref(databaseId, null, { hiddenProperties: [propertyId] })
+      )
     ).toEqual({
       databaseId,
       viewId: null,
       hiddenProperties: [propertyId],
+      filter: null,
+      columnWidths: {},
+    });
+  });
+
+  it("should round-trip a filter and column widths", () => {
+    const filter = {
+      propertyId,
+      operator: FilterOperator.Contains,
+      value: "needs, escaping&",
+    };
+    const columnWidths = { title: 220, [propertyId]: 140 };
+
+    expect(
+      parseDatabaseHref(
+        databaseHref(databaseId, viewId, { filter, columnWidths })
+      )
+    ).toEqual({
+      databaseId,
+      viewId,
+      hiddenProperties: [],
+      filter,
+      columnWidths,
+    });
+  });
+
+  it("should drop a filter that is not a usable condition", () => {
+    const href = `database://${databaseId}?filter=${encodeURIComponent(
+      JSON.stringify({ propertyId, operator: "sql-injection" })
+    )}`;
+    expect(parseDatabaseHref(href)?.filter).toBeNull();
+
+    expect(
+      parseDatabaseHref(`database://${databaseId}?filter=not-json`)?.filter
+    ).toBeNull();
+  });
+
+  it("should drop column widths that are not positive numbers", () => {
+    const href = `database://${databaseId}?widths=${encodeURIComponent(
+      `title:0,${propertyId}:abc,${propertyId2}:120`
+    )}`;
+    expect(parseDatabaseHref(href)?.columnWidths).toEqual({
+      [propertyId2]: 120,
     });
   });
 
@@ -62,7 +116,9 @@ describe("databases rule", () => {
 
   it("should carry hidden properties onto the token", () => {
     const tokens = md.parse(
-      `[Database](${databaseHref(databaseId, viewId, [propertyId, propertyId2])})`,
+      `[Database](${databaseHref(databaseId, viewId, {
+        hiddenProperties: [propertyId, propertyId2],
+      })})`,
       {}
     );
     const token = tokens.find((item) => item.type === "database");

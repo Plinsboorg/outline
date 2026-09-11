@@ -7,9 +7,14 @@ import type {
 import type { Command } from "prosemirror-state";
 import * as React from "react";
 import type { Primitive } from "utility-types";
+import type { FilterCondition } from "../../types";
 import DatabaseBlockComponent from "../components/DatabaseBlock";
 import type { MarkdownSerializerState } from "../lib/markdown/serializer";
-import databasesRule, { databaseHref } from "../rules/databases";
+import databasesRule, {
+  databaseHref,
+  parseFilter,
+  parseWidths,
+} from "../rules/databases";
 import type { ComponentProps } from "../types";
 import Node from "./Node";
 
@@ -45,6 +50,16 @@ export default class DatabaseBlock extends Node {
         hiddenProperties: {
           default: [],
         },
+        // a condition narrowing the view's own filter in THIS embed only, so
+        // one saved view can show a different slice in each document
+        filter: {
+          default: null,
+        },
+        // column widths in pixels for THIS embed only, keyed by property id
+        // (and "title" for the title column)
+        columnWidths: {
+          default: {},
+        },
       },
       parseDOM: [
         {
@@ -55,6 +70,8 @@ export default class DatabaseBlock extends Node {
             hiddenProperties: (dom.getAttribute("data-hidden-properties") ?? "")
               .split(",")
               .filter(Boolean),
+            filter: parseFilter(dom.getAttribute("data-filter")),
+            columnWidths: parseWidths(dom.getAttribute("data-column-widths")),
           }),
         },
       ],
@@ -69,6 +86,18 @@ export default class DatabaseBlock extends Node {
                 "data-hidden-properties": node.attrs.hiddenProperties.join(","),
               }
             : {}),
+          ...(node.attrs.filter
+            ? { "data-filter": JSON.stringify(node.attrs.filter) }
+            : {}),
+          ...(Object.keys(node.attrs.columnWidths ?? {}).length
+            ? {
+                "data-column-widths": Object.entries(
+                  node.attrs.columnWidths ?? {}
+                )
+                  .map(([columnId, width]) => `${columnId}:${String(width)}`)
+                  .join(","),
+              }
+            : {}),
         },
         "Database",
       ],
@@ -77,46 +106,39 @@ export default class DatabaseBlock extends Node {
   }
 
   handleChangeDatabase =
-    ({ node, getPos }: { node: ProsemirrorNode; getPos: () => number }) =>
-    (databaseId: string) => {
-      const { view } = this.editor;
-      const { tr } = view.state;
-      view.dispatch(
-        tr.setNodeMarkup(getPos(), undefined, {
-          ...node.attrs,
-          databaseId,
-        })
-      );
-    };
+    (props: { node: ProsemirrorNode; getPos: () => number }) =>
+    (databaseId: string) =>
+      this.setAttrs(props)({ databaseId });
 
   handleChangeView =
-    ({ node, getPos }: { node: ProsemirrorNode; getPos: () => number }) =>
-    (viewId: string | null) => {
-      const { view } = this.editor;
-      const { tr } = view.state;
-      view.dispatch(
-        tr.setNodeMarkup(getPos(), undefined, {
-          ...node.attrs,
-          viewId,
-        })
-      );
-    };
+    (props: { node: ProsemirrorNode; getPos: () => number }) =>
+    (viewId: string | null) =>
+      this.setAttrs(props)({ viewId });
 
   handleToggleProperty =
-    ({ node, getPos }: { node: ProsemirrorNode; getPos: () => number }) =>
+    (props: { node: ProsemirrorNode; getPos: () => number }) =>
     (propertyId: string) => {
-      const { view } = this.editor;
-      const { tr } = view.state;
-      const current: string[] = node.attrs.hiddenProperties ?? [];
-      const hiddenProperties = current.includes(propertyId)
-        ? current.filter((id) => id !== propertyId)
-        : [...current, propertyId];
-      view.dispatch(
-        tr.setNodeMarkup(getPos(), undefined, {
-          ...node.attrs,
-          hiddenProperties,
-        })
-      );
+      const current: string[] = props.node.attrs.hiddenProperties ?? [];
+      this.setAttrs(props)({
+        hiddenProperties: current.includes(propertyId)
+          ? current.filter((id) => id !== propertyId)
+          : [...current, propertyId],
+      });
+    };
+
+  handleChangeFilter =
+    (props: { node: ProsemirrorNode; getPos: () => number }) =>
+    (filter: FilterCondition | null) =>
+      this.setAttrs(props)({ filter });
+
+  handleResizeColumn =
+    (props: { node: ProsemirrorNode; getPos: () => number }) =>
+    (columnId: string, width: number) => {
+      const current: Record<string, number> =
+        props.node.attrs.columnWidths ?? {};
+      this.setAttrs(props)({
+        columnWidths: { ...current, [columnId]: Math.round(width) },
+      });
     };
 
   component = (props: ComponentProps) => (
@@ -125,6 +147,8 @@ export default class DatabaseBlock extends Node {
       onChangeDatabase={this.handleChangeDatabase(props)}
       onChangeView={this.handleChangeView(props)}
       onToggleProperty={this.handleToggleProperty(props)}
+      onChangeFilter={this.handleChangeFilter(props)}
+      onResizeColumn={this.handleResizeColumn(props)}
     />
   );
 
@@ -147,11 +171,11 @@ export default class DatabaseBlock extends Node {
     }
     state.ensureNewLine();
     state.write(
-      `[Database](${databaseHref(
-        node.attrs.databaseId,
-        node.attrs.viewId,
-        node.attrs.hiddenProperties
-      )})`
+      `[Database](${databaseHref(node.attrs.databaseId, node.attrs.viewId, {
+        hiddenProperties: node.attrs.hiddenProperties,
+        filter: node.attrs.filter,
+        columnWidths: node.attrs.columnWidths,
+      })})`
     );
     state.write("\n\n");
   }
@@ -165,7 +189,20 @@ export default class DatabaseBlock extends Node {
         hiddenProperties: (token.attrGet("hiddenProperties") ?? "")
           .split(",")
           .filter(Boolean),
+        filter: parseFilter(token.attrGet("filter")),
+        columnWidths: parseWidths(token.attrGet("columnWidths")),
       }),
     };
   }
+
+  /** Writes attributes onto this block's node, leaving the rest untouched. */
+  private setAttrs =
+    ({ node, getPos }: { node: ProsemirrorNode; getPos: () => number }) =>
+    (attrs: Record<string, unknown>) => {
+      const { view } = this.editor;
+      const { tr } = view.state;
+      view.dispatch(
+        tr.setNodeMarkup(getPos(), undefined, { ...node.attrs, ...attrs })
+      );
+    };
 }

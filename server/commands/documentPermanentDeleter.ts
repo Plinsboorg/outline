@@ -1,8 +1,9 @@
 import { chunk, uniq } from "es-toolkit/compat";
 import { Op, QueryTypes } from "sequelize";
+import { mirroredRelationTargetIds } from "@shared/utils/properties";
 import { sleep } from "@shared/utils/timers";
 import Logger from "@server/logging/Logger";
-import { Database, Document, Attachment } from "@server/models";
+import { Database, Document, Event, Attachment } from "@server/models";
 import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import { ProsemirrorHelper } from "@server/models/helpers/ProsemirrorHelper";
 import { RelationHelper } from "@server/models/helpers/RelationHelper";
@@ -116,9 +117,14 @@ export default async function documentPermanentDeleter(documents: Document[]) {
   const facets = await Database.findAll({
     where: { id: { [Op.in]: deletedIds } },
   });
+  const deletedFacetIds = new Set(facets.map((facet) => facet.id));
+  const mirrorTargetIds = new Set<string>();
   for (const facet of facets) {
     const previousSchema = facet.dataSchema;
     facet.dataSchema = [];
+    for (const id of mirroredRelationTargetIds(previousSchema)) {
+      mirrorTargetIds.add(id);
+    }
     try {
       await RelationHelper.syncInverseProperties(facet, previousSchema);
     } catch (error) {
@@ -174,5 +180,35 @@ export default async function documentPermanentDeleter(documents: Document[]) {
       await sleep(100);
     }
   }
+
+  // clients hold databases in their own store, keyed by id: tell them which
+  // ones are gone, and which ones only lost a mirror property. Queued for the
+  // socket rather than recorded — the anchor document's own permanent_delete
+  // event is the audit trail
+  const collectionIdByDocumentId = new Map(
+    documents.map((document) => [document.id, document.collectionId])
+  );
+  for (const facet of facets) {
+    await Event.schedule({
+      name: "databases.delete",
+      modelId: facet.id,
+      collectionId: collectionIdByDocumentId.get(facet.id) ?? null,
+      teamId: facet.teamId,
+    });
+  }
+  for (const id of mirrorTargetIds) {
+    if (deletedFacetIds.has(id)) {
+      continue;
+    }
+    const target = await Database.findByPk(id);
+    if (target) {
+      await Event.schedule({
+        name: "databases.update",
+        modelId: target.id,
+        teamId: target.teamId,
+      });
+    }
+  }
+
   return totalDeleted;
 }

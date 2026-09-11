@@ -3,7 +3,7 @@ import { subDays } from "date-fns";
 import type { Property } from "@shared/types";
 import { PropertyType } from "@shared/types";
 import { errToString } from "@shared/utils/error";
-import { Attachment, Document } from "@server/models";
+import { Attachment, Document, Event } from "@server/models";
 import { RelationHelper } from "@server/models/helpers/RelationHelper";
 import {
   buildAttachment,
@@ -245,5 +245,50 @@ describe("documentPermanentDeleter", () => {
 
     await task.reload();
     expect(task.properties[inverseId]).toBeUndefined();
+  });
+
+  it("should tell clients a deleted database is gone, and its relation partner to reload", async () => {
+    const projects = await buildDatabase();
+    const tasks = await buildDatabase({ teamId: projects.teamId });
+
+    projects.dataSchema = [
+      {
+        id: randomUUID(),
+        name: "Tasks",
+        type: PropertyType.Relation,
+        config: {
+          targetDatabaseId: tasks.id,
+          inversePropertyId: randomUUID(),
+        },
+      },
+    ];
+    await projects.save();
+    await RelationHelper.syncInverseProperties(projects, []);
+
+    const anchor = await Document.findByPk(projects.id, {
+      rejectOnEmpty: true,
+    });
+    const scheduled = vi.spyOn(Event, "schedule");
+
+    try {
+      await anchor.destroy();
+      await documentPermanentDeleter([anchor]);
+
+      const broadcast = scheduled.mock.calls.map(([event]) => event);
+      expect(
+        broadcast.find(
+          (event) =>
+            event?.name === "databases.delete" && event.modelId === projects.id
+        )
+      ).toBeDefined();
+      expect(
+        broadcast.find(
+          (event) =>
+            event?.name === "databases.update" && event.modelId === tasks.id
+        )
+      ).toBeDefined();
+    } finally {
+      scheduled.mockRestore();
+    }
   });
 });

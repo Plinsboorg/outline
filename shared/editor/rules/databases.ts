@@ -1,4 +1,6 @@
 import type MarkdownIt from "markdown-it";
+import type { FilterCondition, PropertyValue } from "../../types";
+import { FilterOperator } from "../../types";
 
 const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const hrefRegex = new RegExp(
@@ -6,9 +8,19 @@ const hrefRegex = new RegExp(
   "i"
 );
 
+/** The per-embed settings a database block carries beyond what it points at. */
+export type DatabaseBlockOptions = {
+  /** Property ids hidden in this embed only. */
+  hiddenProperties?: readonly string[] | null;
+  /** A condition narrowing the view's own filter, in this embed only. */
+  filter?: FilterCondition | null;
+  /** Column widths in pixels, keyed by property id, in this embed only. */
+  columnWidths?: Record<string, number> | null;
+};
+
 /**
  * A markdown-it plugin that converts a paragraph containing a single link of
- * the form `[…](database://<databaseId>[/<viewId>][?hidden=<propertyId>,…])`
+ * the form `[…](database://<databaseId>[/<viewId>][?hidden=…&filter=…&widths=…])`
  * into a database block token, the serialized representation of the inline
  * database node.
  */
@@ -47,6 +59,12 @@ export default function databases(md: MarkdownIt) {
       if (parsed.hiddenProperties.length > 0) {
         token.attrSet("hiddenProperties", parsed.hiddenProperties.join(","));
       }
+      if (parsed.filter) {
+        token.attrSet("filter", JSON.stringify(parsed.filter));
+      }
+      if (Object.keys(parsed.columnWidths).length > 0) {
+        token.attrSet("columnWidths", serializeWidths(parsed.columnWidths));
+      }
 
       // replace the paragraph_open, inline and paragraph_close tokens
       tokens.splice(i - 1, 3, token);
@@ -61,43 +79,137 @@ export default function databases(md: MarkdownIt) {
  *
  * @param databaseId the database the block renders.
  * @param viewId the saved view to apply, if any.
- * @param hiddenProperties property ids hidden in this particular embed,
- * overriding the saved view's own visibility for this instance only.
+ * @param options the per-embed settings layered on top of that view.
  * @returns the serialized href.
  */
 export function databaseHref(
   databaseId: string,
   viewId?: string | null,
-  hiddenProperties?: readonly string[] | null
+  options: DatabaseBlockOptions = {}
 ) {
   const base = `database://${databaseId}${viewId ? `/${viewId}` : ""}`;
-  return hiddenProperties?.length
-    ? `${base}?hidden=${hiddenProperties.join(",")}`
-    : base;
+  const params = new URLSearchParams();
+  if (options.hiddenProperties?.length) {
+    params.set("hidden", options.hiddenProperties.join(","));
+  }
+  if (options.filter) {
+    params.set("filter", JSON.stringify(options.filter));
+  }
+  if (options.columnWidths && Object.keys(options.columnWidths).length > 0) {
+    params.set("widths", serializeWidths(options.columnWidths));
+  }
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
 }
 
 /**
  * Parses a database block href back into its attributes.
  *
  * @param href the serialized href.
- * @returns the database id, view id and per-embed hidden property ids, or
- * undefined when not a database href.
+ * @returns the database id, view id and per-embed settings, or undefined when
+ * not a database href.
  */
 export function parseDatabaseHref(href: string):
   | {
       databaseId: string;
       viewId: string | null;
       hiddenProperties: string[];
+      filter: FilterCondition | null;
+      columnWidths: Record<string, number>;
     }
   | undefined {
   const match = href.match(hrefRegex);
   if (!match) {
     return undefined;
   }
-  const hidden = new URLSearchParams(match[3] ?? "").get("hidden");
+  const params = new URLSearchParams(match[3] ?? "");
+  const hidden = params.get("hidden");
   return {
     databaseId: match[1],
     viewId: match[2] ?? null,
     hiddenProperties: hidden ? hidden.split(",").filter(Boolean) : [],
+    filter: parseFilter(params.get("filter")),
+    columnWidths: parseWidths(params.get("widths")),
   };
+}
+
+/**
+ * Reads a serialized filter condition, which arrives as untrusted markdown —
+ * anything that is not a recognizable condition is dropped rather than
+ * carried into a query.
+ *
+ * @param value the serialized condition.
+ * @returns the condition, or null when there is not a valid one.
+ */
+export function parseFilter(value: string | null): FilterCondition | null {
+  if (!value) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch (_err) {
+    return null;
+  }
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  const { propertyId, operator } = parsed;
+  if (typeof propertyId !== "string" || !propertyId) {
+    return null;
+  }
+  if (!isFilterOperator(operator)) {
+    return null;
+  }
+  return {
+    propertyId,
+    operator,
+    ...(isPropertyValue(parsed.value) ? { value: parsed.value } : {}),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFilterOperator(value: unknown): value is FilterOperator {
+  return (
+    typeof value === "string" &&
+    Object.values<string>(FilterOperator).includes(value)
+  );
+}
+
+function isPropertyValue(value: unknown): value is PropertyValue {
+  return (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === null ||
+    (Array.isArray(value) && value.every((item) => typeof item === "string"))
+  );
+}
+
+/**
+ * Reads serialized column widths, dropping any entry that is not a positive
+ * number of pixels.
+ *
+ * @param value the serialized widths, as `columnId:px` pairs.
+ * @returns the widths by column id.
+ */
+export function parseWidths(value: string | null): Record<string, number> {
+  const widths: Record<string, number> = {};
+  for (const pair of (value ?? "").split(",")) {
+    const [columnId, px] = pair.split(":");
+    const width = Number(px);
+    if (columnId && Number.isFinite(width) && width > 0) {
+      widths[columnId] = Math.round(width);
+    }
+  }
+  return widths;
+}
+
+function serializeWidths(widths: Record<string, number>): string {
+  return Object.entries(widths)
+    .map(([columnId, width]) => `${columnId}:${Math.round(width)}`)
+    .join(",");
 }

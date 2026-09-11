@@ -395,11 +395,19 @@ function useDatabaseHandlers() {
   const { databases } = useStores();
 
   return (socket: SocketWithAuthentication) => {
+    socket.on("databases.create", (event: PartialExcept<Database, "id">) => {
+      databases.add(event);
+    });
+
     // a database's schema can change without this client asking: the server
     // maintains the mirror property of a two-way relation on the database it
     // points at
     socket.on("databases.update", (event: PartialExcept<Database, "id">) => {
       databases.add(event);
+    });
+
+    socket.on("databases.delete", (event: WebsocketEntityDeletedEvent) => {
+      databases.remove(event.modelId);
     });
   };
 }

@@ -6,11 +6,22 @@ import { Link } from "react-router-dom";
 import styled from "styled-components";
 import { PropertyChip } from "../../components/PropertyChip";
 import { s } from "../../styles";
-import type { DataView, Property, PropertyValue } from "../../types";
-import { DataViewType } from "../../types";
+import type {
+  DataView,
+  FilterCondition,
+  Property,
+  PropertyValue,
+} from "../../types";
+import { DataViewType, PropertyType } from "../../types";
 import {
+  TITLE_COLUMN_ID,
+  combineFilters,
+  defaultFilterValue,
+  filterOperatorLabels,
+  filterOperatorsForProperty,
   groupByProperty,
   isGroupableProperty,
+  isValuelessFilterOperator,
   visiblePropertiesForView,
 } from "../../utils/properties";
 import type { RowTree } from "../../utils/rowTree";
@@ -29,6 +40,10 @@ type Props = ComponentProps & {
   onChangeView: (viewId: string | null) => void;
   /** Callback to toggle a property's visibility in this embed only. */
   onToggleProperty: (propertyId: string) => void;
+  /** Callback to set the filter applied in this embed only. */
+  onChangeFilter: (filter: FilterCondition | null) => void;
+  /** Callback to persist a column's width in this embed only. */
+  onResizeColumn: (columnId: string, width: number) => void;
 };
 
 type RowModel = {
@@ -54,6 +69,8 @@ function DatabaseBlock({
   onChangeDatabase,
   onChangeView,
   onToggleProperty,
+  onChangeFilter,
+  onResizeColumn,
 }: Props) {
   const { t } = useTranslation();
   const { databases, documents } = useStores();
@@ -62,7 +79,10 @@ function DatabaseBlock({
   const hiddenIds: ReadonlySet<string> = new Set(
     node.attrs.hiddenProperties ?? []
   );
+  const blockFilter: FilterCondition | null = node.attrs.filter ?? null;
+  const columnWidths: Record<string, number> = node.attrs.columnWidths ?? {};
 
+  const filterKey = JSON.stringify(blockFilter);
   const [rowIds, setRowIds] = React.useState<string[]>();
   const [expandedRowIds, setExpandedRowIds] = React.useState<
     ReadonlySet<string>
@@ -108,7 +128,9 @@ function DatabaseBlock({
         const resolved = databases.get(databaseId)?.resolveView(viewId);
         const { rows: results } = await documents.fetchInDatabase({
           databaseId,
-          filter: resolved?.filter,
+          // this embed's own condition narrows the view's filter rather than
+          // replacing it, the same way it can only hide columns the view shows
+          filter: combineFilters(resolved?.filter, blockFilter ?? undefined),
           propertySorts: resolved?.sorts?.length ? resolved.sorts : undefined,
           limit: ROW_LIMIT,
         });
@@ -123,7 +145,10 @@ function DatabaseBlock({
     }
 
     void load();
-  }, [databaseId, viewId, databases, documents, isMounted]);
+    // the filter is compared by value: prosemirror hands back a new attrs
+    // object whenever the node is re-created, identical contents and all
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [databaseId, viewId, filterKey, databases, documents, isMounted]);
 
   if (!databaseId) {
     const available = databases.orderedData;
@@ -188,6 +213,13 @@ function DatabaseBlock({
               </ViewPicker>
             )}
             {viewSchema.length > 0 && (
+              <FilterMenu
+                schema={viewSchema}
+                filter={blockFilter}
+                onChange={onChangeFilter}
+              />
+            )}
+            {viewSchema.length > 0 && (
               <PropertyVisibilityMenu
                 schema={viewSchema}
                 hiddenIds={hiddenIds}
@@ -234,9 +266,236 @@ function DatabaseBlock({
           isEmpty={isEmpty}
           emptyLabel={t("No documents yet")}
           titleLabel={t("Title")}
+          columnWidths={columnWidths}
+          onResizeColumn={isEditable ? onResizeColumn : undefined}
         />
       )}
     </Container>
+  );
+}
+
+/**
+ * A funnel dropdown holding one filter condition applied to THIS embed only,
+ * narrowing whatever the saved view already filters. Built from native form
+ * controls: this component lives in shared code and cannot reach the app's
+ * select or popover.
+ */
+function FilterMenu({
+  schema,
+  filter,
+  onChange,
+}: {
+  schema: Property[];
+  filter: FilterCondition | null;
+  onChange: (filter: FilterCondition | null) => void;
+}) {
+  const { t } = useTranslation();
+  const [isOpen, setIsOpen] = React.useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [isOpen]);
+
+  const filterable = schema.filter(
+    (property) => filterOperatorsForProperty(property.type).length > 0
+  );
+  const property = schema.find((item) => item.id === filter?.propertyId);
+  const operators = property ? filterOperatorsForProperty(property.type) : [];
+
+  const handleProperty = (propertyId: string) => {
+    const next = filterable.find((item) => item.id === propertyId);
+    if (!next) {
+      onChange(null);
+      return;
+    }
+    const operator = filterOperatorsForProperty(next.type)[0];
+    onChange({
+      propertyId,
+      operator,
+      value: defaultFilterValue(next, operator),
+    });
+  };
+
+  const handleOperator = (value: string) => {
+    if (!filter || !property) {
+      return;
+    }
+    const operator = operators.find((item) => item === value);
+    if (!operator) {
+      return;
+    }
+    onChange({
+      ...filter,
+      operator,
+      value: isValuelessFilterOperator(operator)
+        ? undefined
+        : (filter.value ?? defaultFilterValue(property, operator)),
+    });
+  };
+
+  const handleValue = (value: PropertyValue | undefined) => {
+    if (!filter) {
+      return;
+    }
+    onChange({ ...filter, value });
+  };
+
+  return (
+    <MenuContainer ref={containerRef}>
+      <MenuTrigger
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        aria-label={t("Filter")}
+        aria-expanded={isOpen}
+        $active={!!filter}
+      >
+        <FunnelIcon />
+      </MenuTrigger>
+      {isOpen && (
+        <MenuContent>
+          <FilterRow>
+            <FilterSelect
+              value={filter?.propertyId ?? ""}
+              onChange={(event) => handleProperty(event.target.value)}
+              aria-label={t("Filter by")}
+            >
+              <option value="">{t("No filter")}</option>
+              {filterable.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </FilterSelect>
+          </FilterRow>
+          {filter && property && (
+            <>
+              <FilterRow>
+                <FilterSelect
+                  value={filter.operator}
+                  onChange={(event) => handleOperator(event.target.value)}
+                  aria-label={t("Operator")}
+                >
+                  {operators.map((operator) => (
+                    <option key={operator} value={operator}>
+                      {t(filterOperatorLabels[operator])}
+                    </option>
+                  ))}
+                </FilterSelect>
+              </FilterRow>
+              {!isValuelessFilterOperator(filter.operator) && (
+                <FilterRow>
+                  <FilterValueInput
+                    property={property}
+                    value={filter.value}
+                    onChange={handleValue}
+                  />
+                </FilterRow>
+              )}
+              <FilterRow>
+                <ClearButton type="button" onClick={() => onChange(null)}>
+                  {t("Clear")}
+                </ClearButton>
+              </FilterRow>
+            </>
+          )}
+        </MenuContent>
+      )}
+    </MenuContainer>
+  );
+}
+
+/** The control for a filter's comparison value, chosen by property type. */
+function FilterValueInput({
+  property,
+  value,
+  onChange,
+}: {
+  property: Property;
+  value: PropertyValue | undefined;
+  onChange: (value: PropertyValue | undefined) => void;
+}) {
+  const { t } = useTranslation();
+
+  switch (property.type) {
+    case PropertyType.Select:
+    case PropertyType.MultiSelect:
+      return (
+        <FilterSelect
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => onChange(event.target.value || undefined)}
+          aria-label={t("Value")}
+        >
+          <option value="">{t("Value")}</option>
+          {(property.options ?? []).map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.name}
+            </option>
+          ))}
+        </FilterSelect>
+      );
+
+    case PropertyType.Checkbox:
+      return (
+        <FilterSelect
+          value={value === false ? "false" : "true"}
+          onChange={(event) => onChange(event.target.value === "true")}
+          aria-label={t("Value")}
+        >
+          <option value="true">{t("Checked")}</option>
+          <option value="false">{t("Unchecked")}</option>
+        </FilterSelect>
+      );
+
+    case PropertyType.Number:
+      return (
+        <FilterInput
+          type="number"
+          defaultValue={typeof value === "number" ? String(value) : ""}
+          placeholder={t("Value")}
+          onBlur={(event) => {
+            const parsed = Number(event.target.value);
+            onChange(Number.isFinite(parsed) ? parsed : undefined);
+          }}
+        />
+      );
+
+    case PropertyType.Date:
+      return (
+        <FilterInput
+          type="date"
+          defaultValue={typeof value === "string" ? value.slice(0, 10) : ""}
+          onBlur={(event) => onChange(event.target.value || undefined)}
+        />
+      );
+
+    default:
+      return (
+        <FilterInput
+          type="text"
+          defaultValue={typeof value === "string" ? value : ""}
+          placeholder={t("Value")}
+          onBlur={(event) => onChange(event.target.value || undefined)}
+        />
+      );
+  }
+}
+
+/** A funnel glyph, as outline-icons has no filter icon. */
+function FunnelIcon() {
+  return (
+    <svg width={18} height={18} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M5.5 6h13a1 1 0 0 1 .8 1.6L14 14v4.6a1 1 0 0 1-1.4.9l-2-.9a1 1 0 0 1-.6-.9V14L4.7 7.6A1 1 0 0 1 5.5 6z" />
+    </svg>
   );
 }
 
@@ -351,6 +610,8 @@ const BlockTable = observer(function BlockTable_({
   isEmpty,
   emptyLabel,
   titleLabel,
+  columnWidths,
+  onResizeColumn,
 }: {
   rows: RowModel[];
   rowTree: RowTree<RowModel>;
@@ -360,22 +621,74 @@ const BlockTable = observer(function BlockTable_({
   isEmpty: boolean;
   emptyLabel: string;
   titleLabel: string;
+  columnWidths: Record<string, number>;
+  onResizeColumn?: (columnId: string, width: number) => void;
 }) {
+  // a drag previews locally and is written to the node once, on release, so
+  // that a resize is one undo step rather than one per pointer move
+  const [draftWidths, setDraftWidths] = React.useState<Record<string, number>>(
+    {}
+  );
+
+  const handleDraft = React.useCallback((columnId: string, width: number) => {
+    setDraftWidths((current) => ({ ...current, [columnId]: width }));
+  }, []);
+
+  const handleCommit = React.useCallback(
+    (columnId: string, width: number) => {
+      setDraftWidths((current) => {
+        const { [columnId]: _dropped, ...rest } = current;
+        return rest;
+      });
+      onResizeColumn?.(columnId, width);
+    },
+    [onResizeColumn]
+  );
+
+  const widthFor = (columnId: string) =>
+    draftWidths[columnId] ?? columnWidths[columnId];
+
   return (
     <ScrollContainer>
       <Grid>
         <thead>
           <tr>
-            <HeaderCell $minWidth={180}>{titleLabel}</HeaderCell>
+            <HeaderCell
+              $minWidth={180}
+              $resizable={!!onResizeColumn}
+              style={columnWidthStyle(widthFor(TITLE_COLUMN_ID))}
+            >
+              {titleLabel}
+              {onResizeColumn && (
+                <ColumnResizeHandle
+                  columnId={TITLE_COLUMN_ID}
+                  onDraft={handleDraft}
+                  onCommit={handleCommit}
+                />
+              )}
+            </HeaderCell>
             {schema.map((property) => (
-              <HeaderCell key={property.id}>{property.name}</HeaderCell>
+              <HeaderCell
+                key={property.id}
+                $resizable={!!onResizeColumn}
+                style={columnWidthStyle(widthFor(property.id))}
+              >
+                {property.name}
+                {onResizeColumn && (
+                  <ColumnResizeHandle
+                    columnId={property.id}
+                    onDraft={handleDraft}
+                    onCommit={handleCommit}
+                  />
+                )}
+              </HeaderCell>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((doc) => (
             <tr key={doc.id}>
-              <Cell>
+              <Cell style={columnWidthStyle(widthFor(TITLE_COLUMN_ID))}>
                 <TitleContent
                   style={{
                     paddingLeft:
@@ -392,7 +705,10 @@ const BlockTable = observer(function BlockTable_({
                 </TitleContent>
               </Cell>
               {schema.map((property) => (
-                <Cell key={property.id}>
+                <Cell
+                  key={property.id}
+                  style={columnWidthStyle(widthFor(property.id))}
+                >
                   <PropertyValueLabel
                     property={property}
                     value={doc.propertyValue(property.id)}
@@ -411,6 +727,61 @@ const BlockTable = observer(function BlockTable_({
     </ScrollContainer>
   );
 });
+
+/** The width every column in an embed may be dragged down to, but not below. */
+const MIN_COLUMN_WIDTH = 60;
+
+function columnWidthStyle(width?: number): React.CSSProperties | undefined {
+  return width ? { width, minWidth: width, maxWidth: width } : undefined;
+}
+
+/**
+ * The draggable right edge of a header cell in an embedded table. Dragging
+ * previews the width locally and writes it to the block once the pointer is
+ * released, where it applies to this embed alone.
+ */
+function ColumnResizeHandle({
+  columnId,
+  onDraft,
+  onCommit,
+}: {
+  columnId: string;
+  onDraft: (columnId: string, width: number) => void;
+  onCommit: (columnId: string, width: number) => void;
+}) {
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget;
+    const cell = handle.closest("th");
+    if (!cell) {
+      return;
+    }
+    const startX = event.clientX;
+    const startWidth = cell.getBoundingClientRect().width;
+    let width = Math.round(startWidth);
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      width = Math.max(
+        MIN_COLUMN_WIDTH,
+        Math.round(startWidth + moveEvent.clientX - startX)
+      );
+      onDraft(columnId, width);
+    };
+    const handleUp = () => {
+      handle.removeEventListener("pointermove", handleMove);
+      handle.removeEventListener("pointerup", handleUp);
+      handle.removeEventListener("pointercancel", handleUp);
+      onCommit(columnId, width);
+    };
+    handle.setPointerCapture(event.pointerId);
+    handle.addEventListener("pointermove", handleMove);
+    handle.addEventListener("pointerup", handleUp);
+    handle.addEventListener("pointercancel", handleUp);
+  };
+
+  return <ResizeGrip onPointerDown={handlePointerDown} aria-hidden />;
+}
 
 const BlockBoard = observer(function BlockBoard_({
   rows,
@@ -620,7 +991,7 @@ const MenuContainer = styled.div`
   display: inline-flex;
 `;
 
-const MenuTrigger = styled.button`
+const MenuTrigger = styled.button<{ $active?: boolean }>`
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -630,12 +1001,14 @@ const MenuTrigger = styled.button`
   border: 0;
   border-radius: 4px;
   background: none;
-  color: ${s("textSecondary")};
+  color: ${(props) =>
+    props.$active ? props.theme.accent : props.theme.textSecondary};
   cursor: var(--pointer);
 
   &:hover {
     background: ${s("backgroundSecondary")};
-    color: ${s("text")};
+    color: ${(props) =>
+      props.$active ? props.theme.accent : props.theme.text};
   }
 `;
 
@@ -651,6 +1024,52 @@ const MenuContent = styled.div`
   background: ${s("menuBackground")};
   border-radius: 6px;
   box-shadow: ${s("menuShadow")};
+`;
+
+const FilterRow = styled.div`
+  padding: 4px;
+`;
+
+const FilterSelect = styled.select`
+  width: 100%;
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid ${s("inputBorder")};
+  background: ${s("background")};
+  color: ${s("text")};
+`;
+
+const FilterInput = styled.input`
+  width: 100%;
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid ${s("inputBorder")};
+  background: ${s("background")};
+  color: ${s("text")};
+  outline: none;
+
+  &:focus {
+    border-color: ${s("inputBorderFocused")};
+  }
+`;
+
+const ClearButton = styled.button`
+  width: 100%;
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 0;
+  background: none;
+  color: ${s("textSecondary")};
+  cursor: var(--pointer);
+  text-align: left;
+
+  &:hover {
+    background: ${s("listItemHoverBackground")};
+    color: ${s("text")};
+  }
 `;
 
 const MenuRow = styled.button`
@@ -686,10 +1105,15 @@ const ScrollContainer = styled.div`
 const Grid = styled.table`
   border-collapse: collapse;
   width: 100%;
+  /* column widths come from the header row alone, so a long value cannot stop
+     a column from being dragged narrow; columns with no width of their own
+     share what is left */
+  table-layout: fixed;
   font-size: 14px;
 `;
 
-const HeaderCell = styled.th<{ $minWidth?: number }>`
+const HeaderCell = styled.th<{ $minWidth?: number; $resizable?: boolean }>`
+  position: ${(props) => (props.$resizable ? "relative" : "static")};
   text-align: left;
   font-weight: 500;
   color: ${s("textSecondary")};
@@ -703,9 +1127,31 @@ const HeaderCell = styled.th<{ $minWidth?: number }>`
   }
 `;
 
+const ResizeGrip = styled.div`
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 5px;
+  cursor: col-resize;
+  z-index: 2;
+  touch-action: none;
+
+  &:hover,
+  &:active {
+    background: ${s("accent")};
+    opacity: 0.5;
+  }
+`;
+
 const Cell = styled.td`
   padding: 6px 10px;
   vertical-align: middle;
+  /* the table lays columns out from the header row, so a value has to be
+     clipped rather than push its column wider */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 
   &:not(:last-child) {
     border-right: 1px solid ${s("divider")};

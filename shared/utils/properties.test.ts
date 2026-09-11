@@ -10,12 +10,14 @@ import {
 import {
   TITLE_COLUMN_ID,
   coerceDocumentProperties,
+  combineFilters,
   coercePropertyValue,
   groupByProperty,
   groupOptionIdForValue,
   isGroupableProperty,
   normalizedColumnsForView,
   orderedPropertiesForView,
+  filterOperatorsForProperty,
   mirroredRelationTargetIds,
   pruneFilterReferences,
   relationConfigForTarget,
@@ -1041,5 +1043,67 @@ describe("mirroredRelationTargetIds", () => {
         },
       ])
     ).toEqual([targetDatabaseId]);
+  });
+});
+
+describe("combineFilters", () => {
+  const condition = {
+    propertyId: "priority",
+    operator: FilterOperator.Is,
+    value: "high",
+  };
+
+  it("returns the view's own filter when there is nothing to add", () => {
+    const filter = {
+      conjunction: "and" as const,
+      conditions: [condition],
+    };
+    expect(combineFilters(filter, undefined)).toEqual(filter);
+    expect(combineFilters(undefined, undefined)).toBeUndefined();
+  });
+
+  it("wraps a lone condition in a group", () => {
+    expect(combineFilters(undefined, condition)).toEqual({
+      conjunction: "and",
+      conditions: [condition],
+    });
+  });
+
+  it("nests the view's filter so both must match", () => {
+    const filter = {
+      conjunction: "or" as const,
+      conditions: [
+        { propertyId: "status", operator: FilterOperator.Is, value: "open" },
+      ],
+    };
+    expect(combineFilters(filter, condition)).toEqual({
+      conjunction: "and",
+      conditions: [filter, condition],
+    });
+  });
+
+  it("does not nest an empty group", () => {
+    expect(
+      combineFilters({ conjunction: "and", conditions: [] }, condition)
+    ).toEqual({ conjunction: "and", conditions: [condition] });
+  });
+});
+
+describe("filterOperatorsForProperty", () => {
+  it("offers no operators for a rollup, which is computed at read time", () => {
+    expect(filterOperatorsForProperty(PropertyType.Rollup)).toEqual([]);
+  });
+
+  it("offers only emptiness for a relation", () => {
+    expect(filterOperatorsForProperty(PropertyType.Relation)).toEqual([
+      FilterOperator.IsEmpty,
+      FilterOperator.IsNotEmpty,
+    ]);
+  });
+
+  it("offers comparisons for a number", () => {
+    expect(filterOperatorsForProperty(PropertyType.Number)).toContain(
+      FilterOperator.Gte
+    );
   });
 });

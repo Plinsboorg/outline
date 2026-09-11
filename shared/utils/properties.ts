@@ -507,6 +507,149 @@ export function visiblePropertiesForView(
   );
 }
 
+/** How each filter operator is labelled in the interface, before translation. */
+export const filterOperatorLabels: Record<FilterOperator, string> = {
+  [FilterOperator.Is]: "Is",
+  [FilterOperator.IsNot]: "Is not",
+  [FilterOperator.Contains]: "Contains",
+  [FilterOperator.DoesNotContain]: "Does not contain",
+  [FilterOperator.IsEmpty]: "Is empty",
+  [FilterOperator.IsNotEmpty]: "Is not empty",
+  [FilterOperator.Gt]: "Greater than",
+  [FilterOperator.Gte]: "At least",
+  [FilterOperator.Lt]: "Less than",
+  [FilterOperator.Lte]: "At most",
+  [FilterOperator.Before]: "Before",
+  [FilterOperator.After]: "After",
+  [FilterOperator.On]: "On",
+};
+
+/** The operators that compare against nothing, so need no value. */
+const valuelessOperators = new Set<FilterOperator>([
+  FilterOperator.IsEmpty,
+  FilterOperator.IsNotEmpty,
+]);
+
+/**
+ * Whether an operator stands on its own, with no value to compare against.
+ *
+ * @param operator the operator to check.
+ * @returns true when the operator takes no value.
+ */
+export function isValuelessFilterOperator(operator: FilterOperator): boolean {
+  return valuelessOperators.has(operator);
+}
+
+/**
+ * The operators a property of the given type can be filtered by, in the order
+ * they should be offered. An empty list means the type cannot be filtered.
+ *
+ * @param type the property type to filter on.
+ * @returns the applicable operators.
+ */
+export function filterOperatorsForProperty(
+  type: PropertyType
+): FilterOperator[] {
+  switch (type) {
+    case PropertyType.Rollup:
+      // rollups are computed at read time and cannot be queried
+      return [];
+    case PropertyType.Relation:
+    case PropertyType.Image:
+      return [FilterOperator.IsEmpty, FilterOperator.IsNotEmpty];
+    case PropertyType.Select:
+    case PropertyType.Person:
+      return [
+        FilterOperator.Is,
+        FilterOperator.IsNot,
+        FilterOperator.IsEmpty,
+        FilterOperator.IsNotEmpty,
+      ];
+    case PropertyType.MultiSelect:
+      return [
+        FilterOperator.Contains,
+        FilterOperator.DoesNotContain,
+        FilterOperator.IsEmpty,
+        FilterOperator.IsNotEmpty,
+      ];
+    case PropertyType.Checkbox:
+      return [FilterOperator.Is];
+    case PropertyType.Number:
+      return [
+        FilterOperator.Is,
+        FilterOperator.Gt,
+        FilterOperator.Gte,
+        FilterOperator.Lt,
+        FilterOperator.Lte,
+        FilterOperator.IsEmpty,
+        FilterOperator.IsNotEmpty,
+      ];
+    case PropertyType.Date:
+      return [
+        FilterOperator.Before,
+        FilterOperator.After,
+        FilterOperator.On,
+        FilterOperator.IsEmpty,
+        FilterOperator.IsNotEmpty,
+      ];
+    default:
+      return [
+        FilterOperator.Contains,
+        FilterOperator.Is,
+        FilterOperator.IsEmpty,
+        FilterOperator.IsNotEmpty,
+      ];
+  }
+}
+
+/**
+ * The value a freshly chosen filter starts with, where a type has an obvious
+ * one — a checkbox filters on checked, a select on its first option.
+ *
+ * @param property the property being filtered on.
+ * @param operator the chosen operator.
+ * @returns the initial value, or undefined to leave it unset.
+ */
+export function defaultFilterValue(
+  property: Property,
+  operator: FilterOperator
+): PropertyValue | undefined {
+  if (isValuelessFilterOperator(operator)) {
+    return undefined;
+  }
+  if (property.type === PropertyType.Checkbox) {
+    return true;
+  }
+  if (
+    property.type === PropertyType.Select ||
+    property.type === PropertyType.MultiSelect
+  ) {
+    return property.options?.[0]?.id;
+  }
+  return undefined;
+}
+
+/**
+ * Narrows a saved view's filter with one more condition, so that somewhere
+ * showing the view can filter it further without changing the view itself.
+ *
+ * @param filter the view's own filter, if any.
+ * @param condition the extra condition to apply on top, if any.
+ * @returns the filter to query with, or undefined when neither applies.
+ */
+export function combineFilters(
+  filter: FilterGroup | undefined,
+  condition: FilterCondition | undefined
+): FilterGroup | undefined {
+  if (!condition) {
+    return filter;
+  }
+  if (!filter?.conditions.length) {
+    return { conjunction: "and", conditions: [condition] };
+  }
+  return { conjunction: "and", conditions: [filter, condition] };
+}
+
 /**
  * Returns the ids of the databases holding a mirror property for this schema —
  * the target of every relation that declares a back link. The server maintains

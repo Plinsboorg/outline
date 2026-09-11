@@ -326,6 +326,7 @@ export default class WebsocketsProcessor {
         return;
       }
 
+      case "databases.create":
       case "databases.update": {
         const database = await Database.findByPk(event.modelId, {
           paranoid: false,
@@ -344,6 +345,14 @@ export default class WebsocketsProcessor {
         return socketio
           .to(channels)
           .emit(event.name, presentDatabase(database));
+      }
+
+      case "databases.delete": {
+        // both the database and the document it was anchored to are gone by
+        // now, so the collection it lived in is all there is to address
+        return socketio
+          .to(`collection-${event.collectionId}`)
+          .emit(event.name, { modelId: event.modelId });
       }
 
       case "collections.create": {

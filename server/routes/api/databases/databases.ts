@@ -153,7 +153,8 @@ router.post(
     });
 
     const schema: Property[] = dataSchema ?? [];
-    const database = await Database.create(
+    const database = await Database.createWithCtx(
+      ctx,
       {
         id: document.id,
         dataSchema: schema,
@@ -161,6 +162,9 @@ router.post(
         teamId: user.teamId,
         createdById: user.id,
       },
+      // queued for the socket only: the anchor document's own create event
+      // carries the audit trail
+      { persist: false },
       { transaction }
     );
 
