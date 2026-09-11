@@ -16,6 +16,12 @@ export type DatabaseBlockOptions = {
   filter?: FilterCondition | null;
   /** Column widths in pixels, keyed by property id, in this embed only. */
   columnWidths?: Record<string, number> | null;
+  /**
+   * Whether a column's cells wrap, keyed by property id, overriding the saved
+   * view's own setting in this embed only. A column with no entry follows the
+   * view.
+   */
+  wrappedColumns?: Record<string, boolean> | null;
 };
 
 /**
@@ -65,6 +71,12 @@ export default function databases(md: MarkdownIt) {
       if (Object.keys(parsed.columnWidths).length > 0) {
         token.attrSet("columnWidths", serializeWidths(parsed.columnWidths));
       }
+      if (Object.keys(parsed.wrappedColumns).length > 0) {
+        token.attrSet(
+          "wrappedColumns",
+          serializeWrapped(parsed.wrappedColumns)
+        );
+      }
 
       // replace the paragraph_open, inline and paragraph_close tokens
       tokens.splice(i - 1, 3, token);
@@ -98,6 +110,12 @@ export function databaseHref(
   if (options.columnWidths && Object.keys(options.columnWidths).length > 0) {
     params.set("widths", serializeWidths(options.columnWidths));
   }
+  if (
+    options.wrappedColumns &&
+    Object.keys(options.wrappedColumns).length > 0
+  ) {
+    params.set("wrap", serializeWrapped(options.wrappedColumns));
+  }
   const query = params.toString();
   return query ? `${base}?${query}` : base;
 }
@@ -116,6 +134,7 @@ export function parseDatabaseHref(href: string):
       hiddenProperties: string[];
       filter: FilterCondition | null;
       columnWidths: Record<string, number>;
+      wrappedColumns: Record<string, boolean>;
     }
   | undefined {
   const match = href.match(hrefRegex);
@@ -130,6 +149,7 @@ export function parseDatabaseHref(href: string):
     hiddenProperties: hidden ? hidden.split(",").filter(Boolean) : [],
     filter: parseFilter(params.get("filter")),
     columnWidths: parseWidths(params.get("widths")),
+    wrappedColumns: parseWrapped(params.get("wrap")),
   };
 }
 
@@ -206,6 +226,30 @@ export function parseWidths(value: string | null): Record<string, number> {
     }
   }
   return widths;
+}
+
+/**
+ * Reads serialized wrap overrides, ignoring anything that is not a plain
+ * on or off.
+ *
+ * @param value the serialized overrides, as `columnId:1` / `columnId:0` pairs.
+ * @returns whether each named column wraps.
+ */
+export function parseWrapped(value: string | null): Record<string, boolean> {
+  const wrapped: Record<string, boolean> = {};
+  for (const pair of (value ?? "").split(",")) {
+    const [columnId, flag] = pair.split(":");
+    if (columnId && (flag === "0" || flag === "1")) {
+      wrapped[columnId] = flag === "1";
+    }
+  }
+  return wrapped;
+}
+
+function serializeWrapped(wrapped: Record<string, boolean>): string {
+  return Object.entries(wrapped)
+    .map(([columnId, wrap]) => `${columnId}:${wrap ? "1" : "0"}`)
+    .join(",");
 }
 
 function serializeWidths(widths: Record<string, number>): string {

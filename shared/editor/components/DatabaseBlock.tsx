@@ -44,6 +44,9 @@ type Props = ComponentProps & {
   onChangeFilter: (filter: FilterCondition | null) => void;
   /** Callback to persist a column's width in this embed only. */
   onResizeColumn: (columnId: string, width: number) => void;
+  /** Callback to set whether a column wraps in this embed; null follows the
+   * saved view again. */
+  onToggleWrap: (columnId: string, wrap: boolean | null) => void;
 };
 
 type RowModel = {
@@ -71,6 +74,7 @@ function DatabaseBlock({
   onToggleProperty,
   onChangeFilter,
   onResizeColumn,
+  onToggleWrap,
 }: Props) {
   const { t } = useTranslation();
   const { databases, documents } = useStores();
@@ -81,6 +85,8 @@ function DatabaseBlock({
   );
   const blockFilter: FilterCondition | null = node.attrs.filter ?? null;
   const columnWidths: Record<string, number> = node.attrs.columnWidths ?? {};
+  const wrapOverrides: Record<string, boolean> =
+    node.attrs.wrappedColumns ?? {};
 
   const filterKey = JSON.stringify(blockFilter);
   const [rowIds, setRowIds] = React.useState<string[]>();
@@ -102,6 +108,12 @@ function DatabaseBlock({
   const visibleSchema = viewSchema.filter(
     (property) => !hiddenIds.has(property.id)
   );
+
+  // a column wraps if this embed says so, and otherwise if the saved view
+  // does — the embed's entry is an override, not a replacement
+  const wrapsColumn = (columnId: string): boolean =>
+    wrapOverrides[columnId] ??
+    !!view?.columns.find((column) => column.propertyId === columnId)?.wrap;
 
   const handleToggleRowExpand = React.useCallback((rowId: string) => {
     setExpandedRowIds((current) => {
@@ -224,6 +236,9 @@ function DatabaseBlock({
                 schema={viewSchema}
                 hiddenIds={hiddenIds}
                 onToggle={onToggleProperty}
+                titleLabel={t("Title")}
+                wrapsColumn={wrapsColumn}
+                onToggleWrap={onToggleWrap}
               />
             )}
           </HeaderActions>
@@ -268,6 +283,7 @@ function DatabaseBlock({
           titleLabel={t("Title")}
           columnWidths={columnWidths}
           onResizeColumn={isEditable ? onResizeColumn : undefined}
+          wrapsColumn={wrapsColumn}
         />
       )}
     </Container>
@@ -510,10 +526,16 @@ function PropertyVisibilityMenu({
   schema,
   hiddenIds,
   onToggle,
+  titleLabel,
+  wrapsColumn,
+  onToggleWrap,
 }: {
   schema: Property[];
   hiddenIds: ReadonlySet<string>;
   onToggle: (propertyId: string) => void;
+  titleLabel: string;
+  wrapsColumn: (columnId: string) => boolean;
+  onToggleWrap: (columnId: string, wrap: boolean | null) => void;
 }) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = React.useState(false);
@@ -544,6 +566,7 @@ function PropertyVisibilityMenu({
       </MenuTrigger>
       {isOpen && (
         <MenuContent role="menu">
+          <MenuSectionLabel>{t("Visible")}</MenuSectionLabel>
           {schema.map((property) => (
             <MenuRow
               key={property.id}
@@ -554,6 +577,23 @@ function PropertyVisibilityMenu({
             >
               <MenuLabel>{property.name}</MenuLabel>
               {!hiddenIds.has(property.id) && <CheckmarkIcon size={16} />}
+            </MenuRow>
+          ))}
+          <MenuDivider />
+          <MenuSectionLabel>{t("Wrap text")}</MenuSectionLabel>
+          {[
+            { id: TITLE_COLUMN_ID, name: titleLabel },
+            ...schema.filter((property) => !hiddenIds.has(property.id)),
+          ].map((column) => (
+            <MenuRow
+              key={`wrap-${column.id}`}
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={wrapsColumn(column.id)}
+              onClick={() => onToggleWrap(column.id, !wrapsColumn(column.id))}
+            >
+              <MenuLabel>{column.name}</MenuLabel>
+              {wrapsColumn(column.id) && <CheckmarkIcon size={16} />}
             </MenuRow>
           ))}
         </MenuContent>
@@ -612,6 +652,7 @@ const BlockTable = observer(function BlockTable_({
   titleLabel,
   columnWidths,
   onResizeColumn,
+  wrapsColumn,
 }: {
   rows: RowModel[];
   rowTree: RowTree<RowModel>;
@@ -623,6 +664,7 @@ const BlockTable = observer(function BlockTable_({
   titleLabel: string;
   columnWidths: Record<string, number>;
   onResizeColumn?: (columnId: string, width: number) => void;
+  wrapsColumn: (columnId: string) => boolean;
 }) {
   // a drag previews locally and is written to the node once, on release, so
   // that a resize is one undo step rather than one per pointer move
@@ -688,7 +730,10 @@ const BlockTable = observer(function BlockTable_({
         <tbody>
           {rows.map((doc) => (
             <tr key={doc.id}>
-              <Cell style={columnWidthStyle(widthFor(TITLE_COLUMN_ID))}>
+              <Cell
+                $wrap={wrapsColumn(TITLE_COLUMN_ID)}
+                style={columnWidthStyle(widthFor(TITLE_COLUMN_ID))}
+              >
                 <TitleContent
                   style={{
                     paddingLeft:
@@ -707,6 +752,7 @@ const BlockTable = observer(function BlockTable_({
               {schema.map((property) => (
                 <Cell
                   key={property.id}
+                  $wrap={wrapsColumn(property.id)}
                   style={columnWidthStyle(widthFor(property.id))}
                 >
                   <PropertyValueLabel
@@ -1026,6 +1072,21 @@ const MenuContent = styled.div`
   box-shadow: ${s("menuShadow")};
 `;
 
+const MenuSectionLabel = styled.div`
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: ${s("textTertiary")};
+`;
+
+const MenuDivider = styled.hr`
+  border: 0;
+  border-top: 1px solid ${s("divider")};
+  margin: 4px 0;
+`;
+
 const FilterRow = styled.div`
   padding: 4px;
 `;
@@ -1144,14 +1205,15 @@ const ResizeGrip = styled.div`
   }
 `;
 
-const Cell = styled.td`
+const Cell = styled.td<{ $wrap?: boolean }>`
   padding: 6px 10px;
   vertical-align: middle;
   /* the table lays columns out from the header row, so a value has to be
-     clipped rather than push its column wider */
+     clipped or wrapped rather than push its column wider */
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: ${(props) => (props.$wrap ? "pre-wrap" : "nowrap")};
+  overflow-wrap: ${(props) => (props.$wrap ? "anywhere" : "normal")};
 
   &:not(:last-child) {
     border-right: 1px solid ${s("divider")};

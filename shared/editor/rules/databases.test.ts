@@ -15,6 +15,7 @@ describe("databaseHref", () => {
       hiddenProperties: [],
       filter: null,
       columnWidths: {},
+      wrappedColumns: {},
     });
     expect(parseDatabaseHref(databaseHref(databaseId, viewId))).toEqual({
       databaseId,
@@ -22,6 +23,7 @@ describe("databaseHref", () => {
       hiddenProperties: [],
       filter: null,
       columnWidths: {},
+      wrappedColumns: {},
     });
     expect(
       parseDatabaseHref(
@@ -35,6 +37,7 @@ describe("databaseHref", () => {
       hiddenProperties: [propertyId, propertyId2],
       filter: null,
       columnWidths: {},
+      wrappedColumns: {},
     });
     expect(
       parseDatabaseHref(
@@ -46,20 +49,27 @@ describe("databaseHref", () => {
       hiddenProperties: [propertyId],
       filter: null,
       columnWidths: {},
+      wrappedColumns: {},
     });
   });
 
-  it("should round-trip a filter and column widths", () => {
+  it("should round-trip a filter, column widths and wrapping", () => {
     const filter = {
       propertyId,
       operator: FilterOperator.Contains,
       value: "needs, escaping&",
     };
     const columnWidths = { title: 220, [propertyId]: 140 };
+    // both states are carried: off is an override of a view that wraps
+    const wrappedColumns = { [propertyId]: true, [propertyId2]: false };
 
     expect(
       parseDatabaseHref(
-        databaseHref(databaseId, viewId, { filter, columnWidths })
+        databaseHref(databaseId, viewId, {
+          filter,
+          columnWidths,
+          wrappedColumns,
+        })
       )
     ).toEqual({
       databaseId,
@@ -67,6 +77,16 @@ describe("databaseHref", () => {
       hiddenProperties: [],
       filter,
       columnWidths,
+      wrappedColumns,
+    });
+  });
+
+  it("should drop wrap overrides that are not on or off", () => {
+    const href = `database://${databaseId}?wrap=${encodeURIComponent(
+      `${propertyId}:yes,${propertyId2}:1`
+    )}`;
+    expect(parseDatabaseHref(href)?.wrappedColumns).toEqual({
+      [propertyId2]: true,
     });
   });
 

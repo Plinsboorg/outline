@@ -14,6 +14,7 @@ import databasesRule, {
   databaseHref,
   parseFilter,
   parseWidths,
+  parseWrapped,
 } from "../rules/databases";
 import type { ComponentProps } from "../types";
 import Node from "./Node";
@@ -60,6 +61,11 @@ export default class DatabaseBlock extends Node {
         columnWidths: {
           default: {},
         },
+        // whether a column wraps in THIS embed, overriding the saved view's
+        // own setting; a column with no entry follows the view
+        wrappedColumns: {
+          default: {},
+        },
       },
       parseDOM: [
         {
@@ -72,6 +78,9 @@ export default class DatabaseBlock extends Node {
               .filter(Boolean),
             filter: parseFilter(dom.getAttribute("data-filter")),
             columnWidths: parseWidths(dom.getAttribute("data-column-widths")),
+            wrappedColumns: parseWrapped(
+              dom.getAttribute("data-wrapped-columns")
+            ),
           }),
         },
       ],
@@ -95,6 +104,15 @@ export default class DatabaseBlock extends Node {
                   node.attrs.columnWidths ?? {}
                 )
                   .map(([columnId, width]) => `${columnId}:${String(width)}`)
+                  .join(","),
+              }
+            : {}),
+          ...(Object.keys(node.attrs.wrappedColumns ?? {}).length
+            ? {
+                "data-wrapped-columns": Object.entries(
+                  node.attrs.wrappedColumns ?? {}
+                )
+                  .map(([columnId, wrap]) => `${columnId}:${wrap ? "1" : "0"}`)
                   .join(","),
               }
             : {}),
@@ -131,6 +149,18 @@ export default class DatabaseBlock extends Node {
     (filter: FilterCondition | null) =>
       this.setAttrs(props)({ filter });
 
+  handleToggleWrap =
+    (props: { node: ProsemirrorNode; getPos: () => number }) =>
+    (columnId: string, wrap: boolean | null) => {
+      const current: Record<string, boolean> =
+        props.node.attrs.wrappedColumns ?? {};
+      // null clears the override, handing the column back to the saved view
+      const { [columnId]: _cleared, ...rest } = current;
+      this.setAttrs(props)({
+        wrappedColumns: wrap === null ? rest : { ...current, [columnId]: wrap },
+      });
+    };
+
   handleResizeColumn =
     (props: { node: ProsemirrorNode; getPos: () => number }) =>
     (columnId: string, width: number) => {
@@ -149,6 +179,7 @@ export default class DatabaseBlock extends Node {
       onToggleProperty={this.handleToggleProperty(props)}
       onChangeFilter={this.handleChangeFilter(props)}
       onResizeColumn={this.handleResizeColumn(props)}
+      onToggleWrap={this.handleToggleWrap(props)}
     />
   );
 
@@ -175,6 +206,7 @@ export default class DatabaseBlock extends Node {
         hiddenProperties: node.attrs.hiddenProperties,
         filter: node.attrs.filter,
         columnWidths: node.attrs.columnWidths,
+        wrappedColumns: node.attrs.wrappedColumns,
       })})`
     );
     state.write("\n\n");
@@ -191,6 +223,7 @@ export default class DatabaseBlock extends Node {
           .filter(Boolean),
         filter: parseFilter(token.attrGet("filter")),
         columnWidths: parseWidths(token.attrGet("columnWidths")),
+        wrappedColumns: parseWrapped(token.attrGet("wrappedColumns")),
       }),
     };
   }
