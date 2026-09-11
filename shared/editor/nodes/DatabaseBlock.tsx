@@ -39,6 +39,12 @@ export default class DatabaseBlock extends Node {
         viewId: {
           default: null,
         },
+        // property ids hidden in THIS embed only, layered on top of whatever
+        // the referenced view already hides — lets the same database show
+        // different columns in different documents without new saved views
+        hiddenProperties: {
+          default: [],
+        },
       },
       parseDOM: [
         {
@@ -46,6 +52,9 @@ export default class DatabaseBlock extends Node {
           getAttrs: (dom: HTMLDivElement) => ({
             databaseId: dom.getAttribute("data-database-id") ?? "",
             viewId: dom.getAttribute("data-view-id"),
+            hiddenProperties: (dom.getAttribute("data-hidden-properties") ?? "")
+              .split(",")
+              .filter(Boolean),
           }),
         },
       ],
@@ -55,6 +64,11 @@ export default class DatabaseBlock extends Node {
           class: "database-block",
           "data-database-id": node.attrs.databaseId,
           ...(node.attrs.viewId ? { "data-view-id": node.attrs.viewId } : {}),
+          ...(node.attrs.hiddenProperties?.length
+            ? {
+                "data-hidden-properties": node.attrs.hiddenProperties.join(","),
+              }
+            : {}),
         },
         "Database",
       ],
@@ -88,11 +102,29 @@ export default class DatabaseBlock extends Node {
       );
     };
 
+  handleToggleProperty =
+    ({ node, getPos }: { node: ProsemirrorNode; getPos: () => number }) =>
+    (propertyId: string) => {
+      const { view } = this.editor;
+      const { tr } = view.state;
+      const current: string[] = node.attrs.hiddenProperties ?? [];
+      const hiddenProperties = current.includes(propertyId)
+        ? current.filter((id) => id !== propertyId)
+        : [...current, propertyId];
+      view.dispatch(
+        tr.setNodeMarkup(getPos(), undefined, {
+          ...node.attrs,
+          hiddenProperties,
+        })
+      );
+    };
+
   component = (props: ComponentProps) => (
     <DatabaseBlockComponent
       {...props}
       onChangeDatabase={this.handleChangeDatabase(props)}
       onChangeView={this.handleChangeView(props)}
+      onToggleProperty={this.handleToggleProperty(props)}
     />
   );
 
@@ -115,7 +147,11 @@ export default class DatabaseBlock extends Node {
     }
     state.ensureNewLine();
     state.write(
-      `[Database](${databaseHref(node.attrs.databaseId, node.attrs.viewId)})`
+      `[Database](${databaseHref(
+        node.attrs.databaseId,
+        node.attrs.viewId,
+        node.attrs.hiddenProperties
+      )})`
     );
     state.write("\n\n");
   }
@@ -126,6 +162,9 @@ export default class DatabaseBlock extends Node {
       getAttrs: (token: Token) => ({
         databaseId: token.attrGet("databaseId"),
         viewId: token.attrGet("viewId"),
+        hiddenProperties: (token.attrGet("hiddenProperties") ?? "")
+          .split(",")
+          .filter(Boolean),
       }),
     };
   }

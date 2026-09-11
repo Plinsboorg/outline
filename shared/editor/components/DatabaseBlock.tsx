@@ -1,5 +1,5 @@
 import { observer } from "mobx-react";
-import { CollapsedIcon } from "outline-icons";
+import { CheckmarkIcon, CollapsedIcon, EyeIcon } from "outline-icons";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -27,6 +27,8 @@ type Props = ComponentProps & {
   onChangeDatabase: (databaseId: string) => void;
   /** Callback to set the saved view rendered by this block. */
   onChangeView: (viewId: string | null) => void;
+  /** Callback to toggle a property's visibility in this embed only. */
+  onToggleProperty: (propertyId: string) => void;
 };
 
 type RowModel = {
@@ -51,11 +53,15 @@ function DatabaseBlock({
   isEditable,
   onChangeDatabase,
   onChangeView,
+  onToggleProperty,
 }: Props) {
   const { t } = useTranslation();
   const { databases, documents } = useStores();
   const isMounted = useIsMounted();
   const { databaseId, viewId } = node.attrs;
+  const hiddenIds: ReadonlySet<string> = new Set(
+    node.attrs.hiddenProperties ?? []
+  );
 
   const [rowIds, setRowIds] = React.useState<string[]>();
   const [expandedRowIds, setExpandedRowIds] = React.useState<
@@ -69,7 +75,13 @@ function DatabaseBlock({
   // saved views at all falls back to a table over every property.
   const view: DataView | undefined = database?.resolveView(viewId);
   const viewType = view?.type ?? DataViewType.Table;
-  const visibleSchema = visiblePropertiesForView(schema, view);
+  // the view's own visibility, further narrowed by this embed's own
+  // overrides — an embed can hide a column the view shows, but not the other
+  // way around (showing one the view itself excludes needs a different view)
+  const viewSchema = visiblePropertiesForView(schema, view);
+  const visibleSchema = viewSchema.filter(
+    (property) => !hiddenIds.has(property.id)
+  );
 
   const handleToggleRowExpand = React.useCallback((rowId: string) => {
     setExpandedRowIds((current) => {
@@ -159,19 +171,30 @@ function DatabaseBlock({
     <Container contentEditable={false}>
       <Header>
         <Title to={database.path}>{database.name}</Title>
-        {isEditable && views.length > 0 && (
-          <ViewPicker>
-            {views.map((item: DataView) => (
-              <PickerButton
-                key={item.id}
-                type="button"
-                onClick={() => onChangeView(item.id)}
-                $active={view?.id === item.id}
-              >
-                {item.name}
-              </PickerButton>
-            ))}
-          </ViewPicker>
+        {isEditable && (views.length > 0 || viewSchema.length > 0) && (
+          <HeaderActions>
+            {views.length > 0 && (
+              <ViewPicker>
+                {views.map((item: DataView) => (
+                  <PickerButton
+                    key={item.id}
+                    type="button"
+                    onClick={() => onChangeView(item.id)}
+                    $active={view?.id === item.id}
+                  >
+                    {item.name}
+                  </PickerButton>
+                ))}
+              </ViewPicker>
+            )}
+            {viewSchema.length > 0 && (
+              <PropertyVisibilityMenu
+                schema={viewSchema}
+                hiddenIds={hiddenIds}
+                onToggle={onToggleProperty}
+              />
+            )}
+          </HeaderActions>
         )}
       </Header>
       {viewType === DataViewType.Board ? (
@@ -214,6 +237,69 @@ function DatabaseBlock({
         />
       )}
     </Container>
+  );
+}
+
+/**
+ * An eye-icon dropdown listing the properties this embed's view would show,
+ * with a checkmark for the ones actually visible here — toggling one hides
+ * or reveals it in THIS embed only, leaving the saved view and every other
+ * embed of the same database untouched. Self-contained (no portal) since
+ * this component lives in shared code and cannot use the app's Popover.
+ */
+function PropertyVisibilityMenu({
+  schema,
+  hiddenIds,
+  onToggle,
+}: {
+  schema: Property[];
+  hiddenIds: ReadonlySet<string>;
+  onToggle: (propertyId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [isOpen, setIsOpen] = React.useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [isOpen]);
+
+  return (
+    <MenuContainer ref={containerRef}>
+      <MenuTrigger
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        aria-label={t("Visible properties")}
+        aria-expanded={isOpen}
+      >
+        <EyeIcon size={18} />
+      </MenuTrigger>
+      {isOpen && (
+        <MenuContent role="menu">
+          {schema.map((property) => (
+            <MenuRow
+              key={property.id}
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={!hiddenIds.has(property.id)}
+              onClick={() => onToggle(property.id)}
+            >
+              <MenuLabel>{property.name}</MenuLabel>
+              {!hiddenIds.has(property.id) && <CheckmarkIcon size={16} />}
+            </MenuRow>
+          ))}
+        </MenuContent>
+      )}
+    </MenuContainer>
   );
 }
 
@@ -516,10 +602,81 @@ const Title = styled(Link)`
   color: ${s("text")};
 `;
 
+const HeaderActions = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+`;
+
 const ViewPicker = styled.span`
   display: inline-flex;
   gap: 4px;
   flex-wrap: wrap;
+`;
+
+const MenuContainer = styled.div`
+  position: relative;
+  display: inline-flex;
+`;
+
+const MenuTrigger = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: ${s("textSecondary")};
+  cursor: var(--pointer);
+
+  &:hover {
+    background: ${s("backgroundSecondary")};
+    color: ${s("text")};
+  }
+`;
+
+const MenuContent = styled.div`
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 1;
+  min-width: 180px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  background: ${s("menuBackground")};
+  border-radius: 6px;
+  box-shadow: ${s("menuShadow")};
+`;
+
+const MenuRow = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 6px 8px;
+  border-radius: 4px;
+  color: ${s("text")};
+  font-size: 14px;
+  cursor: var(--pointer);
+  text-align: left;
+
+  &:hover {
+    background: ${s("backgroundSecondary")};
+  }
+`;
+
+const MenuLabel = styled.span`
+  flex-grow: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 
 const ScrollContainer = styled.div`

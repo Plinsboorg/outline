@@ -6,6 +6,7 @@ import { PropertyChip } from "../../components/PropertyChip";
 import { s } from "../../styles";
 import type { Property, PropertyValue } from "../../types";
 import { PropertyType } from "../../types";
+import { renderInlineMarkdown } from "../../utils/renderInlineMarkdown";
 import { sanitizeImageSrc, sanitizeUrl } from "../../utils/urls";
 import useStores from "../../hooks/useStores";
 
@@ -32,6 +33,11 @@ export const PropertyValueLabel = observer(function PropertyValueLabel_({
   }
 
   switch (property.type) {
+    case PropertyType.Text:
+      return typeof value === "string" && value ? (
+        <span>{renderInlineMarkdown(value)}</span>
+      ) : null;
+
     case PropertyType.Checkbox:
       return <span>{value === true ? "✓" : ""}</span>;
 
