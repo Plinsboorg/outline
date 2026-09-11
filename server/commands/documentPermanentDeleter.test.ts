@@ -1,7 +1,15 @@
+import { randomUUID } from "node:crypto";
 import { subDays } from "date-fns";
+import type { Property } from "@shared/types";
+import { PropertyType } from "@shared/types";
 import { errToString } from "@shared/utils/error";
 import { Attachment, Document } from "@server/models";
-import { buildAttachment, buildDocument } from "@server/test/factories";
+import { RelationHelper } from "@server/models/helpers/RelationHelper";
+import {
+  buildAttachment,
+  buildDatabase,
+  buildDocument,
+} from "@server/test/factories";
 import { mockTaskSchedule } from "@server/test/support";
 import documentPermanentDeleter from "./documentPermanentDeleter";
 
@@ -193,5 +201,49 @@ describe("documentPermanentDeleter", () => {
         paranoid: false,
       })
     ).toEqual(1);
+  });
+
+  it("should clear a deleted row's back-references from the other side of a bidirectional relation", async () => {
+    const projects = await buildDatabase();
+    const tasks = await buildDatabase({ teamId: projects.teamId });
+
+    const relationId = randomUUID();
+    const inverseId = randomUUID();
+    const schema: Property[] = [
+      {
+        id: relationId,
+        name: "Tasks",
+        type: PropertyType.Relation,
+        config: { targetDatabaseId: tasks.id, inversePropertyId: inverseId },
+      },
+    ];
+    projects.dataSchema = schema;
+    await projects.save();
+    await RelationHelper.syncInverseProperties(projects, []);
+    await tasks.reload();
+
+    const project = await buildDocument({
+      teamId: projects.teamId,
+      collectionId: projects.document!.collectionId,
+      databaseId: projects.id,
+      publishedAt: subDays(new Date(), 90),
+    });
+    const task = await buildDocument({
+      teamId: projects.teamId,
+      collectionId: tasks.document!.collectionId,
+      databaseId: tasks.id,
+    });
+
+    project.properties = { [relationId]: [task.id] };
+    await project.save();
+    await RelationHelper.syncInverseValues(project, projects.dataSchema, {});
+    await task.reload();
+    expect(task.properties[inverseId]).toEqual([project.id]);
+
+    await project.destroy();
+    await documentPermanentDeleter([project]);
+
+    await task.reload();
+    expect(task.properties[inverseId]).toBeUndefined();
   });
 });

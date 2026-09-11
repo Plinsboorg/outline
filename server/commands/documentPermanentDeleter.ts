@@ -127,6 +127,35 @@ export default async function documentPermanentDeleter(documents: Document[]) {
     }
   }
 
+  // rows being deleted carry relation values pointing at other rows — clear
+  // those back-references first, or the other side of the relation is left
+  // with a dangling id pointing at nothing
+  const stillDeletedDocuments = documents.filter((document) =>
+    deletedIds.includes(document.id)
+  );
+  const rowDatabaseIds = uniq(
+    stillDeletedDocuments
+      .map((document) => document.databaseId)
+      .filter((id): id is string => !!id)
+  );
+  if (rowDatabaseIds.length > 0) {
+    const rowDatabases = await Database.findAll({
+      where: { id: { [Op.in]: rowDatabaseIds } },
+    });
+    const databaseById = new Map(
+      rowDatabases.map((database) => [database.id, database])
+    );
+    for (const row of stillDeletedDocuments) {
+      const database = row.databaseId
+        ? databaseById.get(row.databaseId)
+        : undefined;
+      if (!database) {
+        continue;
+      }
+      await RelationHelper.clearInverseValues(row, database.dataSchema);
+    }
+  }
+
   // Small batch size and inter-batch sleep keep the exclusive lock window short
   // enough to avoid blocking concurrent web requests, since each delete
   // cascades into vectors, attachments, revisions, comments, and notifications.
