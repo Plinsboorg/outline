@@ -1,5 +1,7 @@
 import markdownit from "markdown-it";
-import { FilterOperator } from "../../types";
+import type { DataViewOverride } from "../../types";
+import { FilterOperator, SummaryAggregation } from "../../types";
+import { serializeViewOverride } from "../../utils/viewOverride";
 import databases, { databaseHref, parseDatabaseHref } from "./databases";
 
 const databaseId = "11111111-1111-4111-8111-111111111111";
@@ -12,101 +14,105 @@ describe("databaseHref", () => {
     expect(parseDatabaseHref(databaseHref(databaseId))).toEqual({
       databaseId,
       viewId: null,
-      hiddenProperties: [],
-      filter: null,
-      columnWidths: {},
-      wrappedColumns: {},
+      viewOverride: null,
     });
     expect(parseDatabaseHref(databaseHref(databaseId, viewId))).toEqual({
       databaseId,
       viewId,
-      hiddenProperties: [],
-      filter: null,
-      columnWidths: {},
-      wrappedColumns: {},
+      viewOverride: null,
     });
+    // an override that changes nothing is not carried at all
     expect(
-      parseDatabaseHref(
-        databaseHref(databaseId, viewId, {
-          hiddenProperties: [propertyId, propertyId2],
-        })
-      )
+      parseDatabaseHref(databaseHref(databaseId, viewId, { viewOverride: {} }))
     ).toEqual({
       databaseId,
       viewId,
-      hiddenProperties: [propertyId, propertyId2],
-      filter: null,
-      columnWidths: {},
-      wrappedColumns: {},
-    });
-    expect(
-      parseDatabaseHref(
-        databaseHref(databaseId, null, { hiddenProperties: [propertyId] })
-      )
-    ).toEqual({
-      databaseId,
-      viewId: null,
-      hiddenProperties: [propertyId],
-      filter: null,
-      columnWidths: {},
-      wrappedColumns: {},
+      viewOverride: null,
     });
   });
 
-  it("should round-trip a filter, column widths and wrapping", () => {
+  it("should round-trip a whole view override", () => {
+    const viewOverride: DataViewOverride = {
+      columns: [
+        { propertyId, visible: false },
+        { propertyId: propertyId2, width: 140, wrap: true },
+        { propertyId: "title", summary: SummaryAggregation.Count },
+      ],
+      columnOrder: ["title", propertyId2, propertyId],
+      sorts: [{ propertyId: propertyId2, direction: "desc" }],
+      filter: {
+        conjunction: "and",
+        conditions: [
+          {
+            propertyId,
+            operator: FilterOperator.Contains,
+            value: "needs, escaping&",
+          },
+        ],
+      },
+      groupBy: propertyId,
+    };
+
+    expect(
+      parseDatabaseHref(databaseHref(databaseId, viewId, { viewOverride }))
+    ).toEqual({ databaseId, viewId, viewOverride });
+  });
+
+  it("should read the settings older blocks carried separately", () => {
     const filter = {
       propertyId,
       operator: FilterOperator.Contains,
-      value: "needs, escaping&",
+      value: "x",
     };
-    const columnWidths = { title: 220, [propertyId]: 140 };
-    // both states are carried: off is an override of a view that wraps
-    const wrappedColumns = { [propertyId]: true, [propertyId2]: false };
+    const href =
+      `database://${databaseId}/${viewId}?hidden=${propertyId}` +
+      `&filter=${encodeURIComponent(JSON.stringify(filter))}` +
+      `&widths=${encodeURIComponent(`title:220,${propertyId2}:140`)}` +
+      `&wrap=${encodeURIComponent(`${propertyId}:1,${propertyId2}:0`)}`;
 
-    expect(
+    expect(parseDatabaseHref(href)?.viewOverride).toEqual({
+      columns: [
+        { propertyId, visible: false, wrap: true },
+        { propertyId: "title", width: 220 },
+        { propertyId: propertyId2, width: 140, wrap: false },
+      ],
+      filter: { conjunction: "and", conditions: [filter] },
+    });
+  });
+
+  it("should drop an override that is not usable", () => {
+    const override = (value: unknown) =>
       parseDatabaseHref(
-        databaseHref(databaseId, viewId, {
-          filter,
-          columnWidths,
-          wrappedColumns,
-        })
-      )
-    ).toEqual({
-      databaseId,
-      viewId,
-      hiddenProperties: [],
-      filter,
-      columnWidths,
-      wrappedColumns,
-    });
-  });
+        `database://${databaseId}?v=${encodeURIComponent(
+          JSON.stringify(value)
+        )}`
+      )?.viewOverride;
 
-  it("should drop wrap overrides that are not on or off", () => {
-    const href = `database://${databaseId}?wrap=${encodeURIComponent(
-      `${propertyId}:yes,${propertyId2}:1`
-    )}`;
-    expect(parseDatabaseHref(href)?.wrappedColumns).toEqual({
-      [propertyId2]: true,
-    });
-  });
-
-  it("should drop a filter that is not a usable condition", () => {
-    const href = `database://${databaseId}?filter=${encodeURIComponent(
-      JSON.stringify({ propertyId, operator: "sql-injection" })
-    )}`;
-    expect(parseDatabaseHref(href)?.filter).toBeNull();
-
+    expect(override({ columns: "nope", sorts: 4 })).toBeNull();
     expect(
-      parseDatabaseHref(`database://${databaseId}?filter=not-json`)?.filter
+      parseDatabaseHref(`database://${databaseId}?v=not-json`)?.viewOverride
     ).toBeNull();
-  });
-
-  it("should drop column widths that are not positive numbers", () => {
-    const href = `database://${databaseId}?widths=${encodeURIComponent(
-      `title:0,${propertyId}:abc,${propertyId2}:120`
-    )}`;
-    expect(parseDatabaseHref(href)?.columnWidths).toEqual({
-      [propertyId2]: 120,
+    // a filter reaches the row query, so an unknown operator is not carried
+    expect(
+      override({
+        filter: {
+          conjunction: "and",
+          conditions: [{ propertyId, operator: "sql-injection" }],
+        },
+      })
+    ).toBeNull();
+    // junk is dropped from around what is usable
+    expect(
+      override({
+        columns: [
+          { propertyId, width: -10 },
+          { propertyId: propertyId2, visible: false },
+        ],
+        sorts: [{ propertyId, direction: "sideways" }],
+      })
+    ).toEqual({
+      columns: [{ propertyId: propertyId2, visible: false }],
+      sorts: [],
     });
   });
 
@@ -134,16 +140,17 @@ describe("databases rule", () => {
     expect(tokens.some((item) => item.type === "paragraph_open")).toBe(false);
   });
 
-  it("should carry hidden properties onto the token", () => {
+  it("should carry the view override onto the token", () => {
+    const viewOverride: DataViewOverride = {
+      columns: [{ propertyId, visible: false }],
+    };
     const tokens = md.parse(
-      `[Database](${databaseHref(databaseId, viewId, {
-        hiddenProperties: [propertyId, propertyId2],
-      })})`,
+      `[Database](${databaseHref(databaseId, viewId, { viewOverride })})`,
       {}
     );
     const token = tokens.find((item) => item.type === "database");
-    expect(token?.attrGet("hiddenProperties")).toEqual(
-      `${propertyId},${propertyId2}`
+    expect(token?.attrGet("viewOverride")).toEqual(
+      serializeViewOverride(viewOverride)
     );
   });
 

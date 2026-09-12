@@ -1,6 +1,11 @@
 import type MarkdownIt from "markdown-it";
-import type { FilterCondition, PropertyValue } from "../../types";
-import { FilterOperator } from "../../types";
+import type { DataViewOverride, FilterCondition } from "../../types";
+import {
+  overrideFromLegacySettings,
+  parseFilterCondition,
+  parseViewOverride,
+  serializeViewOverride,
+} from "../../utils/viewOverride";
 
 const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const hrefRegex = new RegExp(
@@ -10,23 +15,17 @@ const hrefRegex = new RegExp(
 
 /** The per-embed settings a database block carries beyond what it points at. */
 export type DatabaseBlockOptions = {
-  /** Property ids hidden in this embed only. */
-  hiddenProperties?: readonly string[] | null;
-  /** A condition narrowing the view's own filter, in this embed only. */
-  filter?: FilterCondition | null;
-  /** Column widths in pixels, keyed by property id, in this embed only. */
-  columnWidths?: Record<string, number> | null;
   /**
-   * Whether a column's cells wrap, keyed by property id, overriding the saved
-   * view's own setting in this embed only. A column with no entry follows the
+   * How this embed's rendering differs from the saved view it reads — hidden
+   * or resized columns, its own filter, and so on. Absent settings follow the
    * view.
    */
-  wrappedColumns?: Record<string, boolean> | null;
+  viewOverride?: DataViewOverride | null;
 };
 
 /**
  * A markdown-it plugin that converts a paragraph containing a single link of
- * the form `[…](database://<databaseId>[/<viewId>][?hidden=…&filter=…&widths=…])`
+ * the form `[…](database://<databaseId>[/<viewId>][?v=<override>])`
  * into a database block token, the serialized representation of the inline
  * database node.
  */
@@ -62,20 +61,9 @@ export default function databases(md: MarkdownIt) {
       if (parsed.viewId) {
         token.attrSet("viewId", parsed.viewId);
       }
-      if (parsed.hiddenProperties.length > 0) {
-        token.attrSet("hiddenProperties", parsed.hiddenProperties.join(","));
-      }
-      if (parsed.filter) {
-        token.attrSet("filter", JSON.stringify(parsed.filter));
-      }
-      if (Object.keys(parsed.columnWidths).length > 0) {
-        token.attrSet("columnWidths", serializeWidths(parsed.columnWidths));
-      }
-      if (Object.keys(parsed.wrappedColumns).length > 0) {
-        token.attrSet(
-          "wrappedColumns",
-          serializeWrapped(parsed.wrappedColumns)
-        );
+      const serialized = serializeViewOverride(parsed.viewOverride);
+      if (serialized) {
+        token.attrSet("viewOverride", serialized);
       }
 
       // replace the paragraph_open, inline and paragraph_close tokens
@@ -100,24 +88,13 @@ export function databaseHref(
   options: DatabaseBlockOptions = {}
 ) {
   const base = `database://${databaseId}${viewId ? `/${viewId}` : ""}`;
+  const serialized = serializeViewOverride(options.viewOverride);
+  if (!serialized) {
+    return base;
+  }
   const params = new URLSearchParams();
-  if (options.hiddenProperties?.length) {
-    params.set("hidden", options.hiddenProperties.join(","));
-  }
-  if (options.filter) {
-    params.set("filter", JSON.stringify(options.filter));
-  }
-  if (options.columnWidths && Object.keys(options.columnWidths).length > 0) {
-    params.set("widths", serializeWidths(options.columnWidths));
-  }
-  if (
-    options.wrappedColumns &&
-    Object.keys(options.wrappedColumns).length > 0
-  ) {
-    params.set("wrap", serializeWrapped(options.wrappedColumns));
-  }
-  const query = params.toString();
-  return query ? `${base}?${query}` : base;
+  params.set("v", serialized);
+  return `${base}?${params.toString()}`;
 }
 
 /**
@@ -131,10 +108,7 @@ export function parseDatabaseHref(href: string):
   | {
       databaseId: string;
       viewId: string | null;
-      hiddenProperties: string[];
-      filter: FilterCondition | null;
-      columnWidths: Record<string, number>;
-      wrappedColumns: Record<string, boolean>;
+      viewOverride: DataViewOverride | null;
     }
   | undefined {
   const match = href.match(hrefRegex);
@@ -142,14 +116,20 @@ export function parseDatabaseHref(href: string):
     return undefined;
   }
   const params = new URLSearchParams(match[3] ?? "");
-  const hidden = params.get("hidden");
   return {
     databaseId: match[1],
     viewId: match[2] ?? null,
-    hiddenProperties: hidden ? hidden.split(",").filter(Boolean) : [],
-    filter: parseFilter(params.get("filter")),
-    columnWidths: parseWidths(params.get("widths")),
-    wrappedColumns: parseWrapped(params.get("wrap")),
+    viewOverride:
+      parseViewOverride(params.get("v")) ??
+      // blocks written before the per-embed settings were one override
+      overrideFromLegacySettings({
+        hiddenProperties: (params.get("hidden") ?? "")
+          .split(",")
+          .filter(Boolean),
+        filter: parseFilter(params.get("filter")),
+        columnWidths: parseWidths(params.get("widths")),
+        wrappedColumns: parseWrapped(params.get("wrap")),
+      }),
   };
 }
 
@@ -165,48 +145,11 @@ export function parseFilter(value: string | null): FilterCondition | null {
   if (!value) {
     return null;
   }
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(value);
+    return parseFilterCondition(JSON.parse(value));
   } catch (_err) {
     return null;
   }
-  if (!isRecord(parsed)) {
-    return null;
-  }
-  const { propertyId, operator } = parsed;
-  if (typeof propertyId !== "string" || !propertyId) {
-    return null;
-  }
-  if (!isFilterOperator(operator)) {
-    return null;
-  }
-  return {
-    propertyId,
-    operator,
-    ...(isPropertyValue(parsed.value) ? { value: parsed.value } : {}),
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isFilterOperator(value: unknown): value is FilterOperator {
-  return (
-    typeof value === "string" &&
-    Object.values<string>(FilterOperator).includes(value)
-  );
-}
-
-function isPropertyValue(value: unknown): value is PropertyValue {
-  return (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    value === null ||
-    (Array.isArray(value) && value.every((item) => typeof item === "string"))
-  );
 }
 
 /**
@@ -244,16 +187,4 @@ export function parseWrapped(value: string | null): Record<string, boolean> {
     }
   }
   return wrapped;
-}
-
-function serializeWrapped(wrapped: Record<string, boolean>): string {
-  return Object.entries(wrapped)
-    .map(([columnId, wrap]) => `${columnId}:${wrap ? "1" : "0"}`)
-    .join(",");
-}
-
-function serializeWidths(widths: Record<string, number>): string {
-  return Object.entries(widths)
-    .map(([columnId, width]) => `${columnId}:${Math.round(width)}`)
-    .join(",");
 }

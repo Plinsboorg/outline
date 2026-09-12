@@ -4,6 +4,7 @@ import { observable, action, computed, runInAction } from "mobx";
 import type {
   DataViewSort,
   DataViewSummaries,
+  SummaryAggregation,
   DirectionFilter,
   FilterGroup,
   SortFilter,
@@ -376,7 +377,8 @@ export default class DocumentsStore extends Store<Document> {
       databaseId: string;
       filter?: FilterGroup;
       propertySorts?: DataViewSort[];
-      summariesForViewId?: string;
+      /** The column summaries to compute, keyed by property id. */
+      summaries?: Record<string, SummaryAggregation>;
     } & PaginationParams
   ): Promise<{ rows: Document[]; summaries?: DataViewSummaries }> => {
     this.isFetching = true;

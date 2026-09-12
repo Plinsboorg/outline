@@ -8,7 +8,6 @@ import styled from "styled-components";
 import { v4 as uuidv4 } from "uuid";
 import { s } from "@shared/styles";
 import type {
-  DataView,
   DataViewSummaries,
   DataViewSort,
   FilterCondition,
@@ -20,6 +19,7 @@ import { DataViewType, PropertyType } from "@shared/types";
 import { errToString } from "@shared/utils/error";
 import {
   TITLE_COLUMN_ID,
+  intersectFilters,
   isGroupableProperty,
   normalizedColumnsForView,
   orderedPropertiesForView,
@@ -36,7 +36,6 @@ import PlaceholderList from "~/components/List/Placeholder";
 import NudeButton from "~/components/NudeButton";
 import Tooltip from "~/components/Tooltip";
 import { useComputed } from "~/hooks/useComputed";
-import usePersistedState from "~/hooks/usePersistedState";
 import usePolicy from "~/hooks/usePolicy";
 import useDeleteRow from "~/hooks/useDeleteRow";
 import useStores from "~/hooks/useStores";
@@ -47,6 +46,7 @@ import DatabaseTable from "./DatabaseTable";
 import DatabaseTableFilter from "./DatabaseTableFilter";
 import DatabaseViewProperties from "./DatabaseViewProperties";
 import DatabaseViewTabs from "./DatabaseViewTabs";
+import type { DatabaseViewSource } from "../hooks/useDatabaseViewSource";
 import {
   buildRowTree,
   orderRowsByIndex,
@@ -56,9 +56,21 @@ import {
 type Props = {
   /** The database to render. */
   database: Database;
+  /** Where the rendered view is read from and written back to. */
+  source: DatabaseViewSource;
+  /** How many rows to load at a time; the rest is behind "load more". */
+  pageSize?: number;
+  /**
+   * Whether the rendered view's own configuration — its filter, sorting,
+   * grouping and columns — may be changed here. Defaults to the database's
+   * update policy, which is where a saved view is stored; an embedded view
+   * stores its configuration in the host document instead, and passes
+   * whether that document is editable.
+   */
+  canEditView?: boolean;
 };
 
-const PAGE_LIMIT = 100;
+const DEFAULT_PAGE_SIZE = 100;
 const NO_GROUPING = "";
 
 /**
@@ -69,7 +81,12 @@ const NO_GROUPING = "";
  * view and are persisted on it, so switching tabs switches the whole query
  * rather than only the layout.
  */
-function DatabaseView({ database }: Props) {
+function DatabaseView({
+  database,
+  source,
+  pageSize = DEFAULT_PAGE_SIZE,
+  canEditView,
+}: Props) {
   const { t } = useTranslation();
   const { databases, documents, dialogs } = useStores();
   const can = usePolicy(database);
@@ -77,10 +94,10 @@ function DatabaseView({ database }: Props) {
   // may occupy the policy slot with document abilities that have no
   // createRow — row creation delegates to updating the document anyway
   const canCreateRow = can.createRow ?? can.update;
+  // view configuration is stored wherever the rendered view lives: on the
+  // database for a saved view, in the host document for an embedded one
+  const canConfigureView = canEditView ?? can.update;
 
-  const [persistedViewId, setPersistedViewId] = usePersistedState<
-    string | undefined
-  >(`database-view:${database.id}`, undefined);
   const [rows, setRows] = React.useState<Document[]>();
   const [summaries, setSummaries] = React.useState<DataViewSummaries>();
   const [hasMore, setHasMore] = React.useState(false);
@@ -109,7 +126,8 @@ function DatabaseView({ database }: Props) {
   );
   const groupableProperties = schema.filter(isGroupableProperty);
 
-  const activeView = database.resolveView(persistedViewId);
+  const activeView = source.view;
+  const updateView = source.updateView;
   const orderedProperties = orderedPropertiesForView(schema, activeView);
   const visibleProperties = visiblePropertiesForView(schema, activeView);
 
@@ -127,6 +145,9 @@ function DatabaseView({ database }: Props) {
   const filter = activeView?.filter?.conditions?.[0] as
     | FilterCondition
     | undefined;
+  // the empty state should read as filtered whenever rows are being left out,
+  // including by a filter applied beneath this view rather than by it
+  const hasFilter = !!filter || !!source.baseFilter;
 
   // reveal the toolbar on first render when the view already filters or
   // sorts, so the active configuration is not invisible
@@ -161,21 +182,49 @@ function DatabaseView({ database }: Props) {
       ? DataViewType.Table
       : (activeView?.type ?? DataViewType.Table);
 
+  // the rendered view's own filter, narrowed by anything the surface applies
+  // beneath it — the saved view's filter, where this is an override of one.
+  // Memoized because the row query is keyed on it, and combining two filters
+  // builds a new group every time
+  const baseFilter = source.baseFilter;
+  const queryFilter = React.useMemo(
+    () => intersectFilters(baseFilter, activeView?.filter),
+    [baseFilter, activeView?.filter]
+  );
+
+  // the summaries to compute are read off the rendered view, so a view shown
+  // through an override summarises its own columns rather than the saved
+  // view's
+  const summaryColumns = React.useMemo(() => {
+    const entries = (activeView?.columns ?? [])
+      .filter((column) => !!column.summary)
+      .map((column) => [column.propertyId, column.summary!] as const);
+    return entries.length ? Object.fromEntries(entries) : undefined;
+  }, [activeView]);
+
   const query = React.useCallback(
     (offset: number) =>
       documents.fetchInDatabase({
         databaseId: database.id,
-        limit: PAGE_LIMIT,
+        limit: pageSize,
         offset,
         propertySorts: activeView?.sorts?.length ? activeView.sorts : undefined,
-        filter: activeView?.filter,
-        summariesForViewId: activeView?.id,
+        filter: queryFilter,
+        summaries: summaryColumns,
       }),
     // schema is not part of the request, but a schema change can rewrite row
     // values on the server — e.g. toggling auto-numbering — so rows are
     // refetched whenever it changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [documents, database.id, activeView, schema]
+    [
+      documents,
+      database.id,
+      activeView,
+      queryFilter,
+      summaryColumns,
+      schema,
+      pageSize,
+    ]
   );
 
   React.useEffect(() => {
@@ -186,7 +235,7 @@ function DatabaseView({ database }: Props) {
         if (!stale) {
           setRows(result.rows);
           setSummaries(result.summaries);
-          setHasMore(result.rows.length === PAGE_LIMIT);
+          setHasMore(result.rows.length === pageSize);
         }
       } catch (error) {
         toast.error(errToString(error));
@@ -196,7 +245,7 @@ function DatabaseView({ database }: Props) {
     return () => {
       stale = true;
     };
-  }, [query]);
+  }, [query, pageSize]);
 
   const handleLoadMore = React.useCallback(async () => {
     if (!rows) {
@@ -206,48 +255,31 @@ function DatabaseView({ database }: Props) {
     try {
       const result = await query(rows.length);
       setRows((current) => [...(current ?? []), ...result.rows]);
-      setHasMore(result.rows.length === PAGE_LIMIT);
+      setHasMore(result.rows.length === pageSize);
     } catch (error) {
       toast.error(errToString(error));
     } finally {
       setIsLoadingMore(false);
     }
-  }, [rows, query]);
-
-  const updateActiveView = React.useCallback(
-    async (attrs: Partial<DataView>) => {
-      if (!activeView) {
-        return;
-      }
-      const views = (database.views ?? []).map((view) =>
-        view.id === activeView.id ? { ...view, ...attrs } : view
-      );
-      try {
-        await database.save({ views });
-      } catch (error) {
-        toast.error(errToString(error));
-      }
-    },
-    [database, activeView]
-  );
+  }, [rows, query, pageSize]);
 
   const handleSetSort = React.useCallback(
     (propertyId: string, direction: "asc" | "desc" | null) => {
       const next: DataViewSort[] = direction ? [{ propertyId, direction }] : [];
-      void updateActiveView({ sorts: next });
+      updateView({ sorts: next });
     },
-    [updateActiveView]
+    [updateView]
   );
 
   const handleFilter = React.useCallback(
     (condition?: FilterCondition) => {
-      void updateActiveView({
+      updateView({
         filter: condition
           ? { conjunction: "and", conditions: [condition] }
           : undefined,
       });
     },
-    [updateActiveView]
+    [updateView]
   );
 
   const handleNewRow = React.useCallback(
@@ -405,12 +437,12 @@ function DatabaseView({ database }: Props) {
       }
       try {
         await database.save({ views: [...(database.views ?? []), view] });
-        setPersistedViewId(id);
+        source.selectView(id);
       } catch (error) {
         toast.error(errToString(error));
       }
     },
-    [database, groupableProperties, setPersistedViewId]
+    [database, groupableProperties, source]
   );
 
   const handleRenameView = React.useCallback(
@@ -435,14 +467,14 @@ function DatabaseView({ database }: Props) {
       }
       try {
         await database.save({ views });
-        if (persistedViewId === viewId) {
-          setPersistedViewId(views[0].id);
+        if (activeView?.id === viewId) {
+          source.selectView(views[0].id);
         }
       } catch (error) {
         toast.error(errToString(error));
       }
     },
-    [database, persistedViewId, setPersistedViewId]
+    [database, activeView?.id, source]
   );
 
   const handleToggleProperty = React.useCallback(
@@ -451,9 +483,9 @@ function DatabaseView({ database }: Props) {
         (column) =>
           column.propertyId === propertyId ? { ...column, visible } : column
       );
-      void updateActiveView({ columns });
+      updateView({ columns });
     },
-    [schema, activeView, updateActiveView]
+    [schema, activeView, updateView]
   );
 
   const handleChangeSummary = React.useCallback(
@@ -464,9 +496,9 @@ function DatabaseView({ database }: Props) {
             ? { ...column, summary: summary ?? undefined }
             : column
       );
-      void updateActiveView({ columns });
+      updateView({ columns });
     },
-    [schema, activeView, updateActiveView]
+    [schema, activeView, updateView]
   );
 
   // dropping next to a row makes the moved row its sibling, so dragging can
@@ -510,9 +542,9 @@ function DatabaseView({ database }: Props) {
         (column) =>
           column.propertyId === columnId ? { ...column, width } : column
       );
-      void updateActiveView({ columns });
+      updateView({ columns });
     },
-    [schema, activeView, updateActiveView]
+    [schema, activeView, updateView]
   );
 
   const handleToggleWrapColumn = React.useCallback(
@@ -523,9 +555,9 @@ function DatabaseView({ database }: Props) {
             ? { ...column, wrap: wrap || undefined }
             : column
       );
-      void updateActiveView({ columns });
+      updateView({ columns });
     },
-    [schema, activeView, updateActiveView]
+    [schema, activeView, updateView]
   );
 
   const handleRenameTitle = React.useCallback(
@@ -551,18 +583,18 @@ function DatabaseView({ database }: Props) {
       if (from === -1 || to === -1 || from === to) {
         return;
       }
-      void updateActiveView({ columns: arrayMove(columns, from, to) });
+      updateView({ columns: arrayMove(columns, from, to) });
     },
-    [schema, activeView, updateActiveView]
+    [schema, activeView, updateView]
   );
 
   const handleChangeGroupBy = React.useCallback(
     (propertyId: string) => {
-      void updateActiveView({
+      updateView({
         groupBy: propertyId === NO_GROUPING ? undefined : propertyId,
       });
     },
-    [updateActiveView]
+    [updateView]
   );
 
   const handleEditSchema = React.useCallback(() => {
@@ -591,8 +623,9 @@ function DatabaseView({ database }: Props) {
   const showGroupSelect =
     (viewType === DataViewType.Board || viewType === DataViewType.List) &&
     groupableProperties.length > 0 &&
-    can.update;
-  const toolbarVisible = isFilterOpen || isSortOpen || showGroupSelect;
+    canConfigureView;
+  const toolbarVisible =
+    canConfigureView && (isFilterOpen || isSortOpen || showGroupSelect);
 
   return (
     <Fade>
@@ -600,34 +633,38 @@ function DatabaseView({ database }: Props) {
         views={database.views ?? []}
         activeViewId={activeView?.id}
         canEdit={can.update}
-        onSelect={setPersistedViewId}
+        onSelect={source.selectView}
         onCreate={handleCreateView}
         onRename={handleRenameView}
         onDelete={handleDeleteView}
         trailing={
           <>
-            <Tooltip content={t("Filter")}>
-              <ToolbarIconButton
-                type="button"
-                onClick={() => setIsFilterOpen(!isFilterOpen)}
-                aria-label={t("Filter")}
-                $active={!!filter}
-                size={26}
-              >
-                <FilterFunnelIcon />
-              </ToolbarIconButton>
-            </Tooltip>
-            <Tooltip content={t("Sort")}>
-              <ToolbarIconButton
-                type="button"
-                onClick={() => setIsSortOpen(!isSortOpen)}
-                aria-label={t("Sort")}
-                $active={!!sort}
-                size={26}
-              >
-                <SortManualIcon size={20} />
-              </ToolbarIconButton>
-            </Tooltip>
+            {canConfigureView && (
+              <>
+                <Tooltip content={t("Filter")}>
+                  <ToolbarIconButton
+                    type="button"
+                    onClick={() => setIsFilterOpen(!isFilterOpen)}
+                    aria-label={t("Filter")}
+                    $active={!!filter}
+                    size={26}
+                  >
+                    <FilterFunnelIcon />
+                  </ToolbarIconButton>
+                </Tooltip>
+                <Tooltip content={t("Sort")}>
+                  <ToolbarIconButton
+                    type="button"
+                    onClick={() => setIsSortOpen(!isSortOpen)}
+                    aria-label={t("Sort")}
+                    $active={!!sort}
+                    size={26}
+                  >
+                    <SortManualIcon size={20} />
+                  </ToolbarIconButton>
+                </Tooltip>
+              </>
+            )}
             {can.update && (
               <Tooltip content={t("Database properties")}>
                 <ToolbarIconButton
@@ -640,7 +677,7 @@ function DatabaseView({ database }: Props) {
                 </ToolbarIconButton>
               </Tooltip>
             )}
-            {can.update &&
+            {canConfigureView &&
               schema.length > 0 &&
               viewType !== DataViewType.Table && (
                 <DatabaseViewProperties
@@ -772,7 +809,7 @@ function DatabaseView({ database }: Props) {
           rows={listGroupProperty ? orderedRows : rowTree.visibleRows}
           properties={visibleProperties}
           groupByProperty={listGroupProperty}
-          hasFilter={!!filter}
+          hasFilter={hasFilter}
           onNewRow={canCreateRow ? handleNewRowPlain : undefined}
           newRowId={newRowId}
           onNewRowDone={handleNewRowDone}
@@ -785,7 +822,7 @@ function DatabaseView({ database }: Props) {
         <DatabaseGallery
           rows={orderedRows}
           properties={visibleProperties}
-          hasFilter={!!filter}
+          hasFilter={hasFilter}
           onNewRow={canCreateRow ? handleNewRowPlain : undefined}
           newRowId={newRowId}
           onNewRowDone={handleNewRowDone}
@@ -799,11 +836,13 @@ function DatabaseView({ database }: Props) {
           titleName={database.titleName ?? undefined}
           databaseId={database.id}
           onRenameTitle={can.update ? handleRenameTitle : undefined}
-          onResizeColumn={can.update ? handleResizeColumn : undefined}
-          onToggleWrapColumn={can.update ? handleToggleWrapColumn : undefined}
+          onResizeColumn={canConfigureView ? handleResizeColumn : undefined}
+          onToggleWrapColumn={
+            canConfigureView ? handleToggleWrapColumn : undefined
+          }
           sort={sort}
           onSetSort={handleSetSort}
-          hasFilter={!!filter}
+          hasFilter={hasFilter}
           onNewRow={canCreateRow ? handleNewRowPlain : undefined}
           newRowId={newRowId}
           onNewRowDone={handleNewRowDone}
@@ -816,7 +855,7 @@ function DatabaseView({ database }: Props) {
           }
           onDeleteProperty={handleDeleteProperty}
           onDeleteRow={handleDeleteRow}
-          onMoveProperty={can.update ? handleMoveProperty : undefined}
+          onMoveProperty={canConfigureView ? handleMoveProperty : undefined}
           // a sorted view derives its order from the sort, so rows can only
           // be arranged by hand while no sort is applied
           onMoveRow={can.update && !sort ? handleMoveRow : undefined}
@@ -827,7 +866,7 @@ function DatabaseView({ database }: Props) {
           onToggleRowExpand={handleToggleRowExpand}
           onAddSubItem={canCreateRow ? handleNewSubItem : undefined}
           propertiesToggle={
-            can.update && schema.length > 0 ? (
+            canConfigureView && schema.length > 0 ? (
               <DatabaseViewProperties
                 schema={orderedProperties}
                 view={activeView}
@@ -837,7 +876,7 @@ function DatabaseView({ database }: Props) {
           }
           view={activeView}
           summaries={summaries}
-          canEditSummaries={can.update}
+          canEditSummaries={canConfigureView}
           onChangeSummary={handleChangeSummary}
         />
       )}

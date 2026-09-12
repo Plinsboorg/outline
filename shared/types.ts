@@ -712,6 +712,43 @@ export type DataView = {
   groupBy?: string;
 };
 
+/**
+ * A patch on a saved data view, applied where the view is rendered rather
+ * than stored on the view itself. Lets one place a view is shown — an
+ * embedded database block, say — differ from the saved view it reads without
+ * changing it for everywhere else. Every field is optional; an absent field
+ * follows the view, so a later change to the view still reaches the embed.
+ */
+export type DataViewOverride = {
+  /** Per-column settings layered over the view's own, keyed by property id. */
+  columns?: DataViewColumnOverride[];
+  /** The order columns are shown in, by property id; unnamed columns follow. */
+  columnOrder?: string[];
+  /** Sort levels replacing the view's own; an empty array means unsorted. */
+  sorts?: DataViewSort[];
+  /**
+   * A filter narrowing the view's own, rather than replacing it — the rows
+   * shown are those matching both. Null is the same as absent.
+   */
+  filter?: FilterGroup | null;
+  /** Property id to group by; null groups by nothing, absent follows the view. */
+  groupBy?: string | null;
+};
+
+/** The settings of a single column a view override may change. */
+export type DataViewColumnOverride = {
+  /** The property id the column renders, or "title" for the title column. */
+  propertyId: string;
+  /** Column width in pixels. */
+  width?: number;
+  /** Whether the column is visible. */
+  visible?: boolean;
+  /** Whether the column's cells wrap onto as many lines as they need. */
+  wrap?: boolean;
+  /** Aggregation shown in the column footer; null shows none. */
+  summary?: SummaryAggregation | null;
+};
+
 export enum SubscriptionType {
   Document = "documents.update",
 }

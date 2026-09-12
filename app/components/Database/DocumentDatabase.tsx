@@ -2,8 +2,10 @@ import { observer } from "mobx-react";
 import * as React from "react";
 import styled from "styled-components";
 import { TeamPreference } from "@shared/types";
+import type Database from "~/models/Database";
 import type Document from "~/models/Document";
 import DatabaseView from "~/scenes/Database/components/DatabaseView";
+import { useSavedViewSource } from "~/scenes/Database/hooks/useDatabaseViewSource";
 import useStores from "~/hooks/useStores";
 
 type Props = {
@@ -35,10 +37,23 @@ function DocumentDatabase({ document }: Props) {
 
   return (
     <Section>
-      <DatabaseView database={database} />
+      <SavedViews database={database} />
     </Section>
   );
 }
+
+/**
+ * Renders a database through its own saved views, where a change to a view is
+ * saved on the database.
+ */
+const SavedViews = observer(function SavedViews_({
+  database,
+}: {
+  database: Database;
+}) {
+  const source = useSavedViewSource(database);
+  return <DatabaseView database={database} source={source} />;
+});
 
 const Section = styled.div`
   margin: 12px 0;

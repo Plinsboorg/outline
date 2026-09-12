@@ -6820,6 +6820,59 @@ describe("#documents.list property filters", () => {
     expect(after.titles).toEqual(["Second"]);
   });
 
+  it("should compute the summaries asked for by column", async () => {
+    const { user, database } = await buildFixture();
+    const res = await server.post("/api/documents.list", user, {
+      body: {
+        databaseId: database.id,
+        summaries: { [priorityId]: "sum" },
+      },
+    });
+    const json = await res.json();
+    expect(res.status).toEqual(200);
+    // asked for by column rather than by view, so an embedded view can
+    // summarise columns the saved view says nothing about
+    expect(json.summaries).toEqual({ [priorityId]: 9 });
+  });
+
+  it("should compute summaries over the filtered set only", async () => {
+    const { user, database } = await buildFixture();
+    const res = await server.post("/api/documents.list", user, {
+      body: {
+        databaseId: database.id,
+        filter: {
+          conjunction: "and",
+          conditions: [{ propertyId: statusId, operator: "isNotEmpty" }],
+        },
+        summaries: { [priorityId]: "sum" },
+      },
+    });
+    const json = await res.json();
+    expect(res.status).toEqual(200);
+    expect(json.summaries).toEqual({ [priorityId]: 6 });
+  });
+
+  it("should drop a summary the property cannot be aggregated by", async () => {
+    const { user, database } = await buildFixture();
+    const res = await server.post("/api/documents.list", user, {
+      body: {
+        databaseId: database.id,
+        summaries: { [statusId]: "sum" },
+      },
+    });
+    const json = await res.json();
+    expect(res.status).toEqual(200);
+    expect(json.summaries).toEqual({});
+  });
+
+  it("should require a database to summarise", async () => {
+    const { user } = await buildFixture();
+    const res = await server.post("/api/documents.list", user, {
+      body: { summaries: { [priorityId]: "sum" } },
+    });
+    expect(res.status).toEqual(400);
+  });
+
   it("should sort by a number property with empty values last", async () => {
     const { user, database } = await buildFixture();
     const res = await server.post("/api/documents.list", user, {

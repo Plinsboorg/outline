@@ -65,6 +65,10 @@ import { LightboxImageFactory } from "@shared/editor/lib/Lightbox";
 import Lightbox from "~/components/Lightbox";
 import { anchorPlugin } from "@shared/editor/plugins/AnchorPlugin";
 import { toastNotice } from "./toastNotice";
+// Registers the node views this editor renders from app components, before it
+// can mount one. Kept here rather than at the app entry so those components
+// load with the editor rather than with the initial bundle.
+import "./registerNodeComponents";
 
 export type Props = {
   /** An optional identifier for the editor context. It is used to persist local settings */

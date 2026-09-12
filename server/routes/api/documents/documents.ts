@@ -133,6 +133,7 @@ router.post(
       filter,
       propertySorts,
       summariesForViewId,
+      summaries: summaryColumns,
     } = ctx.input.body;
     const { offset, limit } = ctx.state.pagination;
 
@@ -140,7 +141,10 @@ router.post(
     const { user } = ctx.state.auth;
 
     const hasPropertyQuery =
-      !!filter || !!propertySorts?.length || !!summariesForViewId;
+      !!filter ||
+      !!propertySorts?.length ||
+      !!summariesForViewId ||
+      !!summaryColumns;
     if (hasPropertyQuery || databaseId) {
       if (!user.team.getPreference(TeamPreference.DocumentDatabases)) {
         throw ValidationError("Document databases are currently disabled");
@@ -458,11 +462,23 @@ router.post(
     // column summaries describe every row matching the filter, not just this
     // page, so they are aggregated separately against the same conditions
     let summaries: DataViewSummaries | undefined;
-    if (database && summariesForViewId) {
-      const view = database.getView(summariesForViewId);
-      if (view) {
+    if (database && (summariesForViewId || summaryColumns)) {
+      // summaries asked for by column replace whatever the named view
+      // configures, so a view rendered through an override — an embedded
+      // database — can summarise its own columns
+      const view = summariesForViewId
+        ? database.getView(summariesForViewId)
+        : database.resolveView(null);
+      const columns = summaryColumns
+        ? Object.entries(summaryColumns).map(([propertyId, summary]) => ({
+            propertyId,
+            visible: true,
+            summary,
+          }))
+        : view?.columns;
+      if (view && columns?.length) {
         summaries = await SummaryHelper.compute(
-          view,
+          { ...view, columns },
           database.dataSchema,
           where,
           { includeDrafts }

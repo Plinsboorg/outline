@@ -10,7 +10,7 @@ import {
 import {
   TITLE_COLUMN_ID,
   coerceDocumentProperties,
-  combineFilters,
+  intersectFilters,
   coercePropertyValue,
   groupByProperty,
   groupOptionIdForValue,
@@ -1046,46 +1046,40 @@ describe("mirroredRelationTargetIds", () => {
   });
 });
 
-describe("combineFilters", () => {
-  const condition = {
-    propertyId: "priority",
-    operator: FilterOperator.Is,
-    value: "high",
+describe("intersectFilters", () => {
+  const narrowing = {
+    conjunction: "and" as const,
+    conditions: [
+      { propertyId: "priority", operator: FilterOperator.Is, value: "high" },
+    ],
   };
 
-  it("returns the view's own filter when there is nothing to add", () => {
-    const filter = {
-      conjunction: "and" as const,
-      conditions: [condition],
-    };
-    expect(combineFilters(filter, undefined)).toEqual(filter);
-    expect(combineFilters(undefined, undefined)).toBeUndefined();
+  it("returns the filter on its own when there is nothing to narrow it by", () => {
+    expect(intersectFilters(narrowing, undefined)).toEqual(narrowing);
+    expect(intersectFilters(undefined, undefined)).toBeUndefined();
+    expect(intersectFilters(undefined, narrowing)).toEqual(narrowing);
   });
 
-  it("wraps a lone condition in a group", () => {
-    expect(combineFilters(undefined, condition)).toEqual({
-      conjunction: "and",
-      conditions: [condition],
-    });
-  });
-
-  it("nests the view's filter so both must match", () => {
+  it("nests both filters so a row must match each", () => {
     const filter = {
       conjunction: "or" as const,
       conditions: [
         { propertyId: "status", operator: FilterOperator.Is, value: "open" },
       ],
     };
-    expect(combineFilters(filter, condition)).toEqual({
+    expect(intersectFilters(filter, narrowing)).toEqual({
       conjunction: "and",
-      conditions: [filter, condition],
+      conditions: [filter, narrowing],
     });
   });
 
   it("does not nest an empty group", () => {
     expect(
-      combineFilters({ conjunction: "and", conditions: [] }, condition)
-    ).toEqual({ conjunction: "and", conditions: [condition] });
+      intersectFilters({ conjunction: "and", conditions: [] }, narrowing)
+    ).toEqual(narrowing);
+    expect(
+      intersectFilters(narrowing, { conjunction: "and", conditions: [] })
+    ).toEqual(narrowing);
   });
 });
 

@@ -630,24 +630,26 @@ export function defaultFilterValue(
 }
 
 /**
- * Narrows a saved view's filter with one more condition, so that somewhere
- * showing the view can filter it further without changing the view itself.
+ * Combines two filters into the rows matching both, used where a filter is
+ * layered over another rather than replacing it — an embedded view narrowing
+ * the saved view it reads, say. Nested groups are supported by the query
+ * builder, so the two are kept whole rather than flattened.
  *
- * @param filter the view's own filter, if any.
- * @param condition the extra condition to apply on top, if any.
- * @returns the filter to query with, or undefined when neither applies.
+ * @param filter the filter to narrow, if any.
+ * @param narrowing the filter to narrow it by, if any.
+ * @returns the combined filter, or undefined when there is neither.
  */
-export function combineFilters(
+export function intersectFilters(
   filter: FilterGroup | undefined,
-  condition: FilterCondition | undefined
+  narrowing: FilterGroup | undefined
 ): FilterGroup | undefined {
-  if (!condition) {
+  if (!narrowing?.conditions.length) {
     return filter;
   }
   if (!filter?.conditions.length) {
-    return { conjunction: "and", conditions: [condition] };
+    return narrowing;
   }
-  return { conjunction: "and", conditions: [filter, condition] };
+  return { conjunction: "and", conditions: [filter, narrowing] };
 }
 
 /**

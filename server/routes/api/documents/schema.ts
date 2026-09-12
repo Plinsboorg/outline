@@ -5,6 +5,7 @@ import {
   DirectionFilter,
   DocumentPermission,
   StatusFilter,
+  SummaryAggregation,
   TextEditMode,
   SortFilter,
 } from "@shared/types";
@@ -124,6 +125,15 @@ export const DocumentsListSchema = BaseSchema.extend({
      * filtered set. Requires databaseId.
      */
     summariesForViewId: z.uuid().optional(),
+
+    /**
+     * Column summaries to compute over the whole filtered set, keyed by
+     * property id, replacing those the named view configures. Sent where a
+     * view is rendered through an override — an embedded database, whose
+     * summaries belong to the embed rather than to the saved view. Requires
+     * databaseId.
+     */
+    summaries: z.record(z.string(), z.enum(SummaryAggregation)).optional(),
   }),
   // Maintains backwards compatibility
 }).transform((req) => {
