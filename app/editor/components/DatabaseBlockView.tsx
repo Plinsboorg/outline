@@ -152,22 +152,18 @@ const EmbeddedDatabase = observer(function EmbeddedDatabase_({
       <Header>
         <Title to={database.path}>{database.name}</Title>
       </Header>
-      <Body>
-        <DatabaseView
-          database={database}
-          source={source}
-          pageSize={ROW_LIMIT}
-          canEditView={isEditable}
-        />
-      </Body>
+      <DatabaseView
+        database={database}
+        source={source}
+        pageSize={ROW_LIMIT}
+        canEditView={isEditable}
+      />
     </Container>
   );
 });
 
 const Container = styled.div`
   margin: 8px 0;
-  border: 1px solid ${s("divider")};
-  border-radius: 8px;
 `;
 
 const Header = styled.div`
@@ -176,8 +172,7 @@ const Header = styled.div`
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 8px 10px;
-  border-bottom: 1px solid ${s("divider")};
+  padding: 4px 0;
 `;
 
 const Title = styled(Link)`
@@ -185,13 +180,15 @@ const Title = styled(Link)`
   color: ${s("text")};
 `;
 
-const Body = styled.div`
-  /* the table brings its own horizontal scroll container */
-  padding: 0 10px 8px;
-`;
-
+/**
+ * The states with no table to show still need an outline to read as a block
+ * of the document — the rendered database does not, since its own rules give
+ * it a shape.
+ */
 const Placeholder = styled.div`
   padding: 16px;
+  border: 1px solid ${s("divider")};
+  border-radius: 8px;
   color: ${s("textSecondary")};
 `;
 
