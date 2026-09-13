@@ -2026,7 +2026,10 @@ pre {
   }
 }
 
-table {
+/* a table that is part of the document's own content. A node view may render
+   a table of its own — an embedded database does — which brings its own look
+   and opts out with the marker attribute */
+table:not([data-database]) {
   width: 100%;
   border-collapse: separate;
   border-radius: ${EditorStyleHelper.blockRadius};

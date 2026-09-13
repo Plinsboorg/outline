@@ -399,7 +399,9 @@ function DatabaseTable({
 
   return (
     <ScrollContainer>
-      <Grid style={{ width: totalWidth, minWidth: "100%" }}>
+      {/* the marker keeps the editor's own table styling off this one when a
+          database is rendered inside a document — see shared/editor Styles */}
+      <Grid data-database style={{ width: totalWidth, minWidth: "100%" }}>
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
