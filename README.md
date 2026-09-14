@@ -16,6 +16,88 @@
   <a href="https://translate.getoutline.com/project/outline" alt="Localized"><img src="https://badges.crowdin.net/outline/localized.svg"></a>
 </p>
 
+---
+
+## About this fork
+
+`Plinsboorg/outline` is a fork of [Outline](https://github.com/outline/outline)
+that adds **document databases**: typed properties on documents, and
+table / board / list / gallery views over sets of them, embeddable inside any
+document. If you have used Notion databases or Obsidian Bases, it is that,
+built on Outline's documents.
+
+This fork is **not affiliated with or endorsed by General Outline, Inc.**
+[Upstream PR #13210](https://github.com/outline/outline/pull/13210), which
+proposed the feature, was declined as too large to review in one piece. The
+long-term intent is to split it into reviewable changes and propose them
+upstream again; until that happens, this fork is the only place the feature
+exists.
+
+### What it adds
+
+- **Document properties** — typed fields on a document (text, number, select,
+  multi-select, date, person, checkbox, URL, relation, rollup), edited inline
+  at the top of the document, and imported/exported as Markdown frontmatter.
+- **Databases** — a database is a facet of a document, so every row is itself a
+  real Outline document with its own body, permissions, history and search.
+- **Views** — table, board, list and gallery layouts; saved views per database
+  with their own filters, sorts, grouping, column order, widths and footer
+  summaries.
+- **Embedded databases** — drop a database into any document. An embed renders
+  through the same view component as the database page, and can narrow the
+  saved view with its own filters and column settings, restrict which views it
+  offers, and be locked read-only independently of the source.
+- **Rows in the sidebar**, sub-items, drag-to-reorder, and drag in and out of a
+  database.
+
+The feature is enabled by default and can be turned off per workspace under
+**Settings → Details → Document databases**.
+
+Design notes live in [`docs/document-databases-spec.md`](docs/document-databases-spec.md)
+(the original RFC, kept for its rationale) and the phase task logs alongside it.
+
+### Status
+
+Usable and in daily use on a private instance, but young: it has not been
+through a wide beta, the database APIs are not stable yet, and there is no
+migration path promised between releases. Treat it as beta software and keep
+backups. Bugs and feedback are welcome in this fork's issues — please do not
+report fork-specific problems to upstream Outline.
+
+### Running it
+
+Container images are published per commit and per release:
+
+```shell
+docker pull ghcr.io/plinsboorg/outline:main
+```
+
+Otherwise the upstream [hosting documentation](https://docs.getoutline.com/s/hosting/)
+applies unchanged — same environment variables, same Postgres and Redis, and
+migrations run on boot. Building from source is the two-stage upstream build
+(`Dockerfile.base`, then `Dockerfile`).
+
+### Branches
+
+| Branch | What it is |
+| --- | --- |
+| `main` | The fork: upstream plus the database work. Clone this. |
+| `upstream-main` | An unmodified mirror of `outline/outline`'s `main`, for diffing. |
+
+Upstream is **merged** into `main` periodically, never rebased, so `main` is
+safe to track and is not force-pushed. `git diff upstream-main...main` is
+always exactly this fork's changes.
+
+### License
+
+Unchanged from upstream: the [Business Source License 1.1](LICENSE), which
+converts to Apache 2.0 on **2030-07-13**. A fork cannot relicense it, so the
+same terms bind you — in particular the Additional Use Grant, which permits
+self-hosting but not offering the software to third parties as a commercial
+"Document Service". Read the [LICENSE](LICENSE) before deploying commercially.
+
+---
+
 This is the source code that runs [**Outline**](https://www.getoutline.com) and all the associated services. If you want to use Outline then you don't need to run this code, A hosted version of the app is offered at [getoutline.com](https://www.getoutline.com). You can also find documentation on using Outline in [our guide](https://docs.getoutline.com/s/guide).
 
 If you'd like to run your own copy of Outline or contribute to development then this is the place for you.
