@@ -371,7 +371,7 @@ function Details() {
             name={TeamPreference.DocumentDatabases}
             label={t("Document databases")}
             description={t(
-              "When enabled collections can define typed document properties and be viewed as databases. This feature is in beta."
+              "When enabled documents can define typed properties and be viewed as databases. This feature is in beta."
             )}
           >
             <Switch
