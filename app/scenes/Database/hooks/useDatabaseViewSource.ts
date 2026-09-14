@@ -22,6 +22,8 @@ import usePersistedState from "~/hooks/usePersistedState";
  * same either way, and reads the view through this.
  */
 export type DatabaseViewSource = {
+  /** The saved views this surface offers, in order. */
+  views: DataView[];
   /** The view to render, as configured for this surface. */
   view?: DataView;
   /**
@@ -70,19 +72,25 @@ export function useSavedViewSource(database: Database): DatabaseViewSource {
     [database, viewId]
   );
 
+  const views = database.views ?? [];
+  const viewsKey = views.map((item) => item.id).join(",");
+
   return React.useMemo(
     () => ({
+      views,
       view,
       selectView: setPersistedViewId,
       updateView: (attrs: Partial<DataView>) => void updateView(attrs),
     }),
-    [view, setPersistedViewId, updateView]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [viewsKey, view, setPersistedViewId, updateView]
   );
 }
 
 type OverriddenSourceOptions = {
-  /** The database being rendered. */
-  database: Database;
+  /** The saved views this surface offers; every one of the database's own
+   * when not restricted. */
+  views: DataView[];
   /** The saved view being rendered through, if chosen. */
   viewId?: string | null;
   /** How this surface's rendering differs from that view. */
@@ -104,13 +112,17 @@ type OverriddenSourceOptions = {
  * @returns the view source.
  */
 export function useOverriddenViewSource({
-  database,
+  views,
   viewId,
   override,
   onSelectView,
   onChangeOverride,
 }: OverriddenSourceOptions): DatabaseViewSource {
-  const savedView = database.resolveView(viewId ?? undefined);
+  // a surface offering only some of the database's views renders one of
+  // those, whatever view id it was left pointing at
+  const savedView =
+    views.find((item) => item.id === viewId) ?? views[0] ?? undefined;
+  const viewsKey = views.map((item) => item.id).join(",");
   // the override arrives as a plain attribute of a prosemirror node, which
   // hands back an equal-but-new object whenever the node is re-created, so
   // the rendered view is memoized by value — its identity decides when rows
@@ -135,6 +147,7 @@ export function useOverriddenViewSource({
 
   return React.useMemo(
     () => ({
+      views,
       view,
       baseFilter: savedView
         ? baseFilterForOverride(savedView, override)
@@ -143,6 +156,6 @@ export function useOverriddenViewSource({
       updateView,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [view, savedView, overrideKey, onSelectView, updateView]
+    [viewsKey, view, savedView, overrideKey, onSelectView, updateView]
   );
 }

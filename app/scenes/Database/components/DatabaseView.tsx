@@ -68,6 +68,12 @@ type Props = {
    * whether that document is editable.
    */
   canEditView?: boolean;
+  /**
+   * Whether the database is shown without any way to change it here, whatever
+   * the reader is otherwise allowed to do. An embedded view sets this to
+   * protect what a document shows from being edited through it.
+   */
+  readOnly?: boolean;
 };
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -86,6 +92,7 @@ function DatabaseView({
   source,
   pageSize = DEFAULT_PAGE_SIZE,
   canEditView,
+  readOnly = false,
 }: Props) {
   const { t } = useTranslation();
   const { databases, documents, dialogs } = useStores();
@@ -93,10 +100,12 @@ function DatabaseView({
   // the anchor document shares the database's id, so a documents response
   // may occupy the policy slot with document abilities that have no
   // createRow — row creation delegates to updating the document anyway
-  const canCreateRow = can.createRow ?? can.update;
+  const canCreateRow = !readOnly && (can.createRow ?? can.update);
+  // changes to the database itself — its schema, its saved views, its rows
+  const canEditDatabase = !readOnly && can.update;
   // view configuration is stored wherever the rendered view lives: on the
   // database for a saved view, in the host document for an embedded one
-  const canConfigureView = canEditView ?? can.update;
+  const canConfigureView = !readOnly && (canEditView ?? can.update);
 
   const [rows, setRows] = React.useState<Document[]>();
   const [summaries, setSummaries] = React.useState<DataViewSummaries>();
@@ -630,9 +639,9 @@ function DatabaseView({
   return (
     <Fade>
       <DatabaseViewTabs
-        views={database.views ?? []}
+        views={source.views}
         activeViewId={activeView?.id}
-        canEdit={can.update}
+        canEdit={canEditDatabase}
         onSelect={source.selectView}
         onCreate={handleCreateView}
         onRename={handleRenameView}
@@ -665,7 +674,7 @@ function DatabaseView({
                 </Tooltip>
               </>
             )}
-            {can.update && (
+            {canEditDatabase && (
               <Tooltip content={t("Database properties")}>
                 <ToolbarIconButton
                   type="button"
@@ -794,13 +803,14 @@ function DatabaseView({
 
       {viewType === DataViewType.Board && boardGroupByProperty ? (
         <DatabaseBoard
+          readOnly={readOnly}
           rows={orderedRows}
           properties={visibleProperties}
           groupByProperty={boardGroupByProperty}
           onNewRow={canCreateRow ? handleNewRow : undefined}
           newRowId={newRowId}
           onNewRowDone={handleNewRowDone}
-          onDeleteRow={handleDeleteRow}
+          onDeleteRow={readOnly ? undefined : handleDeleteRow}
         />
       ) : viewType === DataViewType.List ? (
         <DatabaseList
@@ -826,16 +836,17 @@ function DatabaseView({
           onNewRow={canCreateRow ? handleNewRowPlain : undefined}
           newRowId={newRowId}
           onNewRowDone={handleNewRowDone}
-          onDeleteRow={handleDeleteRow}
+          onDeleteRow={readOnly ? undefined : handleDeleteRow}
         />
       ) : (
         <DatabaseTable
+          readOnly={readOnly}
           rows={rowTree.visibleRows}
           properties={visibleProperties}
           titleIndex={titleIndex}
           titleName={database.titleName ?? undefined}
           databaseId={database.id}
-          onRenameTitle={can.update ? handleRenameTitle : undefined}
+          onRenameTitle={canEditDatabase ? handleRenameTitle : undefined}
           onResizeColumn={canConfigureView ? handleResizeColumn : undefined}
           onToggleWrapColumn={
             canConfigureView ? handleToggleWrapColumn : undefined
@@ -847,18 +858,18 @@ function DatabaseView({
           newRowId={newRowId}
           onNewRowDone={handleNewRowDone}
           schemaNames={schema.map((property) => property.name)}
-          onAddProperty={can.update ? handleAddProperty : undefined}
-          onOpenSchemaEditor={can.update ? handleEditSchema : undefined}
-          onUpdateProperty={can.update ? handleUpdateProperty : undefined}
+          onAddProperty={canEditDatabase ? handleAddProperty : undefined}
+          onOpenSchemaEditor={canEditDatabase ? handleEditSchema : undefined}
+          onUpdateProperty={canEditDatabase ? handleUpdateProperty : undefined}
           onHideProperty={(propertyId) =>
             handleToggleProperty(propertyId, false)
           }
           onDeleteProperty={handleDeleteProperty}
-          onDeleteRow={handleDeleteRow}
+          onDeleteRow={readOnly ? undefined : handleDeleteRow}
           onMoveProperty={canConfigureView ? handleMoveProperty : undefined}
           // a sorted view derives its order from the sort, so rows can only
           // be arranged by hand while no sort is applied
-          onMoveRow={can.update && !sort ? handleMoveRow : undefined}
+          onMoveRow={canEditDatabase && !sort ? handleMoveRow : undefined}
           rowDepths={rowTree.depthById}
           parentRowIds={rowTree.parentIds}
           expandedRowIds={expandedRowIds}

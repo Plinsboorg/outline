@@ -32,6 +32,11 @@ import DatabaseRowMenu from "./DatabaseRowMenu";
 import RowTitleInput from "./RowTitleInput";
 
 type Props = {
+  /**
+   * Whether the board is shown without any way to change it, whatever the
+   * reader is otherwise allowed to do.
+   */
+  readOnly?: boolean;
   /** The documents to render as cards, in order. */
   rows: Document[];
   /** The properties to display on cards, in order. */
@@ -58,6 +63,7 @@ const EMPTY_COLUMN_ID = "__none__";
  * group property value.
  */
 function DatabaseBoard({
+  readOnly = false,
   rows,
   properties,
   groupByProperty: property,
@@ -118,6 +124,7 @@ function DatabaseBoard({
         {groups.map((group) => (
           <BoardColumn
             key={group.option?.id ?? EMPTY_COLUMN_ID}
+            readOnly={readOnly}
             option={group.option}
             documents={group.items}
             properties={properties}
@@ -135,6 +142,7 @@ function DatabaseBoard({
 }
 
 const BoardColumn = observer(function BoardColumn_({
+  readOnly,
   option,
   documents,
   properties,
@@ -145,6 +153,7 @@ const BoardColumn = observer(function BoardColumn_({
   onNewRowDone,
   onDeleteRow,
 }: {
+  readOnly: boolean;
   option: PropertyOption | null;
   documents: Document[];
   properties: Property[];
@@ -184,6 +193,7 @@ const BoardColumn = observer(function BoardColumn_({
       </ColumnHeader>
       {documents.map((document) => (
         <BoardCard
+          readOnly={readOnly}
           key={document.id}
           document={document}
           properties={properties}
@@ -209,6 +219,7 @@ const BoardColumn = observer(function BoardColumn_({
 });
 
 const BoardCard = observer(function BoardCard_({
+  readOnly,
   document,
   properties,
   groupByProperty: property,
@@ -216,6 +227,7 @@ const BoardCard = observer(function BoardCard_({
   onTitleDone,
   onDelete,
 }: {
+  readOnly: boolean;
   document: Document;
   properties: Property[];
   groupByProperty: Property;
@@ -224,10 +236,12 @@ const BoardCard = observer(function BoardCard_({
   onDelete?: (document: Document) => void;
 }) {
   const can = usePolicy(document);
+  // a card of a protected view is read through, never written through
+  const canEditRow = !readOnly && can.update;
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
       id: document.id,
-      disabled: !can.update || isEditingTitle,
+      disabled: !canEditRow || isEditingTitle,
     });
   // the first visible image property doubles as the card's cover image
   const coverProperty = properties.find(

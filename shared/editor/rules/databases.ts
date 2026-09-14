@@ -21,11 +21,22 @@ export type DatabaseBlockOptions = {
    * view.
    */
   viewOverride?: DataViewOverride | null;
+  /**
+   * Whether this embed shows the database without any way to change it, for
+   * readers who could otherwise edit it.
+   */
+  readOnly?: boolean | null;
+  /**
+   * The saved views this embed offers, by id. Empty offers every view the
+   * database has, including ones added later.
+   */
+  viewIds?: readonly string[] | null;
 };
 
 /**
  * A markdown-it plugin that converts a paragraph containing a single link of
- * the form `[…](database://<databaseId>[/<viewId>][?v=<override>])`
+ * the form
+ * `[…](database://<databaseId>[/<viewId>][?v=<override>&ro=1&views=<ids>])`
  * into a database block token, the serialized representation of the inline
  * database node.
  */
@@ -65,6 +76,12 @@ export default function databases(md: MarkdownIt) {
       if (serialized) {
         token.attrSet("viewOverride", serialized);
       }
+      if (parsed.readOnly) {
+        token.attrSet("readOnly", "1");
+      }
+      if (parsed.viewIds.length > 0) {
+        token.attrSet("viewIds", parsed.viewIds.join(","));
+      }
 
       // replace the paragraph_open, inline and paragraph_close tokens
       tokens.splice(i - 1, 3, token);
@@ -88,13 +105,19 @@ export function databaseHref(
   options: DatabaseBlockOptions = {}
 ) {
   const base = `database://${databaseId}${viewId ? `/${viewId}` : ""}`;
-  const serialized = serializeViewOverride(options.viewOverride);
-  if (!serialized) {
-    return base;
-  }
   const params = new URLSearchParams();
-  params.set("v", serialized);
-  return `${base}?${params.toString()}`;
+  const serialized = serializeViewOverride(options.viewOverride);
+  if (serialized) {
+    params.set("v", serialized);
+  }
+  if (options.readOnly) {
+    params.set("ro", "1");
+  }
+  if (options.viewIds?.length) {
+    params.set("views", options.viewIds.join(","));
+  }
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
 }
 
 /**
@@ -109,6 +132,8 @@ export function parseDatabaseHref(href: string):
       databaseId: string;
       viewId: string | null;
       viewOverride: DataViewOverride | null;
+      readOnly: boolean;
+      viewIds: string[];
     }
   | undefined {
   const match = href.match(hrefRegex);
@@ -119,6 +144,8 @@ export function parseDatabaseHref(href: string):
   return {
     databaseId: match[1],
     viewId: match[2] ?? null,
+    readOnly: params.get("ro") === "1",
+    viewIds: (params.get("views") ?? "").split(",").filter(Boolean),
     viewOverride:
       parseViewOverride(params.get("v")) ??
       // blocks written before the per-embed settings were one override

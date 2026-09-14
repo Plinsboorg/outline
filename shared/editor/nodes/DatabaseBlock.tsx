@@ -32,6 +32,10 @@ export type DatabaseBlockProps = ComponentProps & {
   onChangeView: (viewId: string | null) => void;
   /** Callback to set how this embed differs from the view it reads. */
   onChangeViewOverride: (override: DataViewOverride | null) => void;
+  /** Callback to set whether this embed can be edited through. */
+  onChangeReadOnly: (readOnly: boolean) => void;
+  /** Callback to set which saved views this embed offers; empty offers all. */
+  onChangeViewIds: (viewIds: string[]) => void;
 };
 
 /**
@@ -68,6 +72,16 @@ export default class DatabaseBlock extends Node {
         viewOverride: {
           default: null,
         },
+        // whether the database is shown without any way to change it here,
+        // whatever the reader is otherwise allowed to do
+        readOnly: {
+          default: false,
+        },
+        // the saved views this embed offers, by id; empty offers every view
+        // the database has, including ones added after the embed was written
+        viewIds: {
+          default: [],
+        },
       },
       parseDOM: [
         {
@@ -75,6 +89,10 @@ export default class DatabaseBlock extends Node {
           getAttrs: (dom: HTMLDivElement) => ({
             databaseId: dom.getAttribute("data-database-id") ?? "",
             viewId: dom.getAttribute("data-view-id"),
+            readOnly: dom.getAttribute("data-read-only") === "true",
+            viewIds: (dom.getAttribute("data-view-ids") ?? "")
+              .split(",")
+              .filter(Boolean),
             viewOverride:
               parseViewOverride(dom.getAttribute("data-view-override")) ??
               // blocks copied from a version that carried each per-embed
@@ -109,6 +127,10 @@ export default class DatabaseBlock extends Node {
                 ),
               }
             : {}),
+          ...(node.attrs.readOnly ? { "data-read-only": "true" } : {}),
+          ...(node.attrs.viewIds?.length
+            ? { "data-view-ids": node.attrs.viewIds.join(",") }
+            : {}),
         },
         "Database",
       ],
@@ -135,6 +157,16 @@ export default class DatabaseBlock extends Node {
         viewOverride: serializeViewOverride(viewOverride) ? viewOverride : null,
       });
 
+  handleChangeReadOnly =
+    (props: { node: ProsemirrorNode; getPos: () => number }) =>
+    (readOnly: boolean) =>
+      this.setAttrs(props)({ readOnly });
+
+  handleChangeViewIds =
+    (props: { node: ProsemirrorNode; getPos: () => number }) =>
+    (viewIds: string[]) =>
+      this.setAttrs(props)({ viewIds });
+
   // the block renders a live, editable database — stores, routing, and the
   // same components the database page is built from — so its renderer lives
   // in the app and registers itself there. See lib/nodeComponents.
@@ -146,6 +178,8 @@ export default class DatabaseBlock extends Node {
         onChangeDatabase={this.handleChangeDatabase(props)}
         onChangeView={this.handleChangeView(props)}
         onChangeViewOverride={this.handleChangeViewOverride(props)}
+        onChangeReadOnly={this.handleChangeReadOnly(props)}
+        onChangeViewIds={this.handleChangeViewIds(props)}
       />
     ) : null;
   };
@@ -171,6 +205,8 @@ export default class DatabaseBlock extends Node {
     state.write(
       `[Database](${databaseHref(node.attrs.databaseId, node.attrs.viewId, {
         viewOverride: node.attrs.viewOverride,
+        readOnly: node.attrs.readOnly,
+        viewIds: node.attrs.viewIds,
       })})`
     );
     state.write("\n\n");
@@ -183,6 +219,8 @@ export default class DatabaseBlock extends Node {
         databaseId: token.attrGet("databaseId"),
         viewId: token.attrGet("viewId"),
         viewOverride: parseViewOverride(token.attrGet("viewOverride")),
+        readOnly: token.attrGet("readOnly") === "1",
+        viewIds: (token.attrGet("viewIds") ?? "").split(",").filter(Boolean),
       }),
     };
   }

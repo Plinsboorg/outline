@@ -15,11 +15,15 @@ describe("databaseHref", () => {
       databaseId,
       viewId: null,
       viewOverride: null,
+      readOnly: false,
+      viewIds: [],
     });
     expect(parseDatabaseHref(databaseHref(databaseId, viewId))).toEqual({
       databaseId,
       viewId,
       viewOverride: null,
+      readOnly: false,
+      viewIds: [],
     });
     // an override that changes nothing is not carried at all
     expect(
@@ -28,6 +32,8 @@ describe("databaseHref", () => {
       databaseId,
       viewId,
       viewOverride: null,
+      readOnly: false,
+      viewIds: [],
     });
   });
 
@@ -55,7 +61,34 @@ describe("databaseHref", () => {
 
     expect(
       parseDatabaseHref(databaseHref(databaseId, viewId, { viewOverride }))
-    ).toEqual({ databaseId, viewId, viewOverride });
+    ).toEqual({
+      databaseId,
+      viewId,
+      viewOverride,
+      readOnly: false,
+      viewIds: [],
+    });
+  });
+
+  it("should round-trip the settings that belong to the embed itself", () => {
+    const viewId2 = "55555555-5555-4555-8555-555555555555";
+    const href = databaseHref(databaseId, viewId, {
+      readOnly: true,
+      viewIds: [viewId, viewId2],
+    });
+    expect(parseDatabaseHref(href)).toEqual({
+      databaseId,
+      viewId,
+      viewOverride: null,
+      readOnly: true,
+      viewIds: [viewId, viewId2],
+    });
+
+    // offering every view and allowing edits is the default, and is not
+    // carried in the link at all
+    expect(
+      databaseHref(databaseId, viewId, { readOnly: false, viewIds: [] })
+    ).toEqual(databaseHref(databaseId, viewId));
   });
 
   it("should read the settings older blocks carried separately", () => {
@@ -138,6 +171,19 @@ describe("databases rule", () => {
     expect(token?.attrGet("databaseId")).toEqual(databaseId);
     expect(token?.attrGet("viewId")).toEqual(viewId);
     expect(tokens.some((item) => item.type === "paragraph_open")).toBe(false);
+  });
+
+  it("should carry the embed's own settings onto the token", () => {
+    const tokens = md.parse(
+      `[Database](${databaseHref(databaseId, viewId, {
+        readOnly: true,
+        viewIds: [viewId],
+      })})`,
+      {}
+    );
+    const token = tokens.find((item) => item.type === "database");
+    expect(token?.attrGet("readOnly")).toEqual("1");
+    expect(token?.attrGet("viewIds")).toEqual(viewId);
   });
 
   it("should carry the view override onto the token", () => {

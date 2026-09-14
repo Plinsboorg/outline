@@ -50,6 +50,12 @@ import DatabaseSummaryRow from "./DatabaseSummaryRow";
 import RowTitleInput from "./RowTitleInput";
 
 type Props = {
+  /**
+   * Whether the table is shown without any way to change it, whatever the
+   * reader is otherwise allowed to do — an embedded view can be protected
+   * from editing by the document that holds it.
+   */
+  readOnly?: boolean;
   /** The documents to render as rows, in order. */
   rows: Document[];
   /** The properties to render as columns, in order. */
@@ -133,6 +139,7 @@ type Props = {
  * columns can be reordered by dragging their grips.
  */
 function DatabaseTable({
+  readOnly = false,
   rows,
   properties,
   titleIndex,
@@ -314,6 +321,7 @@ function DatabaseTable({
       {rows.map((document) => (
         <React.Fragment key={document.id}>
           <DatabaseTableRow
+            readOnly={readOnly}
             document={document}
             properties={properties}
             titleIndex={titleIndex}
@@ -752,6 +760,7 @@ function ColumnResizeHandle({
 }
 
 const DatabaseTableRow = observer(function DatabaseTableRow_({
+  readOnly,
   document,
   properties,
   titleIndex,
@@ -767,6 +776,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
   onAddSubItem,
   wrappedColumnIds,
 }: {
+  readOnly: boolean;
   document: Document;
   properties: Property[];
   titleIndex: number;
@@ -784,6 +794,8 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
 }) {
   const { t } = useTranslation();
   const can = usePolicy(document);
+  // a row of a protected view is read through, never written through
+  const canEditRow = !readOnly && can.update;
   const [isRenaming, setIsRenaming] = React.useState(false);
   const {
     attributes,
@@ -852,7 +864,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
               property={property}
               value={document.propertyValue(property.id)}
               onChange={(value) => handleChange(property.id, value)}
-              readOnly={!can.update}
+              readOnly={!canEditRow}
               documentId={document.id}
               wrap={wrappedColumnIds.has(property.id)}
             />
@@ -881,7 +893,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
               </TitleInputPadding>
             ) : (
               <>
-                {can.update ? (
+                {canEditRow ? (
                   // clicking the title renames the row in place, the way a
                   // cell of any other column is edited; the row's page is
                   // opened by the button beside it
