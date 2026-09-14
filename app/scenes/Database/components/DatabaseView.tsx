@@ -218,7 +218,7 @@ function DatabaseView({
         limit: pageSize,
         offset,
         propertySorts: activeView?.sorts?.length ? activeView.sorts : undefined,
-        filter: queryFilter,
+        propertyFilter: queryFilter,
         summaries: summaryColumns,
       }),
     // schema is not part of the request, but a schema change can rewrite row

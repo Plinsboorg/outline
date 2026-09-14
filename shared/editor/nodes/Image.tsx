@@ -22,7 +22,8 @@ import SimpleImage from "./SimpleImage";
 import { LightboxImageFactory } from "../lib/Lightbox";
 import { ImageSource } from "../lib/FileHelper";
 import { DiagramPlaceholder } from "../components/DiagramPlaceholder";
-import { addComment } from "../commands/comment";
+import type { CommentAnchor } from "../commands/comment";
+import { addComment, addDraftCommentAnchor } from "../commands/comment";
 import { addLink } from "../commands/link";
 import { commentedImagePlugin } from "../plugins/CommentedImagePlugin";
 
@@ -113,6 +114,21 @@ export const downloadImageNode = async (
 };
 
 export default class Image extends SimpleImage {
+  declare options: SimpleImage["options"] & {
+    /** Whether the editor is in read-only mode. */
+    readOnly?: boolean;
+    /** Whether the current user has permission to edit the document. */
+    canUpdate?: boolean;
+    /** Callback invoked when a comment mark is created in the document. */
+    onCreateCommentMark?: (
+      commentId: string,
+      userId: string,
+      options?: { focus: boolean; anchor?: CommentAnchor }
+    ) => void;
+    /** Callback invoked to request that the comments sidebar be opened. */
+    onOpenCommentsSidebar?: () => void;
+  };
+
   get schema(): NodeSpec {
     return {
       inline: true,
@@ -404,8 +420,15 @@ export default class Image extends SimpleImage {
       const { view } = this.editor;
       const { tr } = view.state;
 
-      // update meta on object
+      // The blur may fire while the node view is being torn down, at which
+      // point the position no longer refers to this image in the document.
       const pos = getPos();
+      const current =
+        pos === undefined ? undefined : view.state.doc.nodeAt(pos);
+      if (current?.type !== node.type) {
+        return;
+      }
+
       const transaction = tr.setNodeMarkup(pos, undefined, {
         ...node.attrs,
         alt: caption,
@@ -539,8 +562,23 @@ export default class Image extends SimpleImage {
   keys(): Record<string, Command> {
     return {
       ...super.keys(),
-      "Mod-Alt-m": addComment({ userId: this.options.userId }),
+      "Mod-Alt-m": this.commentCommand,
     };
+  }
+
+  /**
+   * Users that can comment but not edit cannot write the comment mark into
+   * the document, so record a pending anchor instead and let the server
+   * apply the mark on submission.
+   */
+  private get commentCommand(): Command {
+    return this.options.readOnly && !this.options.canUpdate
+      ? addDraftCommentAnchor({
+          userId: this.options.userId,
+          onCreate: this.options.onCreateCommentMark,
+          onOpenCommentsSidebar: this.options.onOpenCommentsSidebar,
+        })
+      : addComment({ userId: this.options.userId });
   }
 
   commands({ type }: { type: NodeType }) {
@@ -634,8 +672,7 @@ export default class Image extends SimpleImage {
           dispatch?.(tr.setSelection(new NodeSelection($pos)));
           return true;
         },
-      commentOnImage: (): Command =>
-        addComment({ userId: this.options.userId }),
+      commentOnImage: (): Command => this.commentCommand,
       linkOnImage: (): Command => addLink({ href: "" }),
     };
   }

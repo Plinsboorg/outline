@@ -31,6 +31,16 @@ async function buildEnabledTeam() {
   return { team, user, collection };
 }
 
+async function buildDisabledTeam() {
+  const team = await buildTeam({ preferences: { documentDatabases: false } });
+  const user = await buildUser({ teamId: team.id });
+  const collection = await buildCollection({
+    teamId: team.id,
+    userId: user.id,
+  });
+  return { team, user, collection };
+}
+
 describe("#databases.create", () => {
   it("should create a database with a default view", async () => {
     const { user, collection } = await buildEnabledTeam();
@@ -106,11 +116,7 @@ describe("#databases.create", () => {
   });
 
   it("should fail when the feature is disabled", async () => {
-    const user = await buildUser();
-    const collection = await buildCollection({
-      teamId: user.teamId,
-      userId: user.id,
-    });
+    const { user, collection } = await buildDisabledTeam();
 
     const res = await server.post("/api/databases.create", user, {
       body: { collectionId: collection.id },
@@ -244,13 +250,16 @@ describe("#databases.list", () => {
     const abilities = body.policies.find(
       (policy: { id: string }) => policy.id === database.id
     )?.abilities;
-    expect(abilities?.read).toBe(true);
-    expect(abilities?.createRow).toBe(true);
-    expect(abilities?.update).toBe(true);
+    // An ability granted through a membership serializes as the ids of the
+    // memberships that granted it rather than `true`, so these are checked for
+    // being allowed at all rather than for a particular shape.
+    expect(abilities?.read).toBeTruthy();
+    expect(abilities?.createRow).toBeTruthy();
+    expect(abilities?.update).toBeTruthy();
     // the anchor document's abilities ride along under the shared id, so the
     // client keeps move/star/menu working on the database's document
-    expect(abilities?.move).toBe(true);
-    expect(abilities?.star).toBe(true);
+    expect(abilities?.move).toBeTruthy();
+    expect(abilities?.star).toBeTruthy();
   });
 });
 
@@ -1182,11 +1191,7 @@ describe("#databases.move_row", () => {
   });
 
   it("should fail when the feature is disabled", async () => {
-    const user = await buildUser();
-    const collection = await buildCollection({
-      teamId: user.teamId,
-      userId: user.id,
-    });
+    const { user, collection } = await buildDisabledTeam();
     const database = await buildDatabase({
       teamId: user.teamId,
       userId: user.id,

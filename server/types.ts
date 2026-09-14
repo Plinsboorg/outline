@@ -3,11 +3,13 @@ import type { IRouterParamContext } from "koa-router";
 import type { InferAttributes, Model, Transaction } from "sequelize";
 import type { z } from "zod";
 import type {
+  AuthenticationType,
   CollectionSort,
   NavigationNode,
   Client,
   CollectionPermission,
   JSONValue,
+  MentionType,
   UnfurlResourceType,
   ProsemirrorData,
   UnfurlResponse,
@@ -44,12 +46,7 @@ import type {
   OAuthClient,
 } from "./models";
 
-export enum AuthenticationType {
-  API = "api",
-  APP = "app",
-  MCP = "mcp",
-  OAUTH = "oauth",
-}
+export { AuthenticationType } from "@shared/types";
 
 export type AuthenticationResult = AccountProvisionerResult & {
   client: Client;
@@ -81,6 +78,8 @@ export type AppState = {
   oauthClient?: OAuthClient;
   oauthIntent?: OAuthIntent;
   oauthState?: OAuthState;
+  /** The identifiers this request is rate limited against. */
+  rateLimiterIdentifiers?: string[];
 };
 
 export type AppContext = ParameterizedContext<AppState, DefaultContext>;
@@ -292,7 +291,8 @@ export type CollectionUserEvent = BaseEvent<UserMembership> & {
   userId: string;
   modelId: string;
   collectionId: string;
-  data: {
+  /** Only present when the membership was created or updated. */
+  data?: {
     isNew?: boolean;
   };
 };
@@ -309,7 +309,8 @@ export type DocumentUserEvent = BaseEvent<UserMembership> & {
   userId: string;
   modelId: string;
   documentId: string;
-  data: {
+  /** Only present when the membership was created or updated. */
+  data?: {
     isNew?: boolean;
   };
 };
@@ -465,7 +466,10 @@ export type WebhookSubscriptionEvent = BaseEvent<WebhookSubscription> & {
 };
 
 export type NotificationEvent = BaseEvent<Notification> & {
-  name: "notifications.create" | "notifications.update";
+  name:
+    | "notifications.create"
+    | "notifications.update"
+    | "notifications.delete";
   modelId: string;
   teamId: string;
   userId: string;
@@ -629,6 +633,13 @@ export type UnfurlSignature = (
   url: string,
   actor?: User
 ) => Promise<Unfurl | UnfurlError | undefined>;
+
+/**
+ * Recognizes the URL of a resource belonging to the service and returns the
+ * type of mention that represents it, or undefined when the URL is not one the
+ * service can mention.
+ */
+export type MentionSignature = (url: URL) => MentionType | undefined;
 
 export type UninstallSignature = (integration: Integration) => Promise<void>;
 

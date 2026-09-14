@@ -9,6 +9,7 @@ import {
   buildAttachment,
   buildDatabase,
   buildDocument,
+  buildDraftDocument,
 } from "@server/test/factories";
 import { mockTaskSchedule } from "@server/test/support";
 import documentPermanentDeleter from "./documentPermanentDeleter";
@@ -160,6 +161,23 @@ describe("documentPermanentDeleter", () => {
 
     await child.reload();
     expect(child.parentDocumentId).toEqual(parent.id);
+  });
+
+  it("should detach draft children rather than cascade delete them", async () => {
+    const parent = await buildDocument({
+      publishedAt: subDays(new Date(), 90),
+      deletedAt: subDays(new Date(), 60),
+    });
+    const child = await buildDraftDocument({
+      teamId: parent.teamId,
+      parentDocumentId: parent.id,
+    });
+
+    const countDeletedDoc = await documentPermanentDeleter([parent]);
+    expect(countDeletedDoc).toEqual(1);
+
+    const reloaded = await Document.unscoped().findByPk(child.id);
+    expect(reloaded?.parentDocumentId).toEqual(null);
   });
 
   it("should not destroy attachments referenced in other documents", async () => {

@@ -4,17 +4,12 @@ import useDragResize from "./hooks/useDragResize";
 import { ResizeLeft, ResizeRight } from "./ResizeHandle";
 import type { ComponentProps } from "../types";
 import { isFirefox } from "../../utils/browser";
+import { sanitizeUrl } from "../../utils/urls";
 import Flex from "../../components/Flex";
 import { s } from "../../styles";
 import { Preview, Subtitle, Title } from "./Widget";
 import { EditorStyleHelper } from "../styles/EditorStyleHelper";
-
-/**
- * Default dimensions for the PDF preview – approximately the width of a standard
- * document with an A4 portrait aspect ratio.
- */
-const naturalWidth = 768;
-const naturalHeight = 1086;
+import { pdfNaturalHeight, pdfNaturalWidth } from "../lib/pdf";
 
 type Props = ComponentProps & {
   /** Icon to display on the left side of the widget */
@@ -37,8 +32,8 @@ export default function PdfViewer(props: Props) {
   const { width, handlePointerDown, dragging } = useDragResize({
     width: node.attrs.width,
     height: node.attrs.height,
-    naturalWidth,
-    naturalHeight,
+    naturalWidth: pdfNaturalWidth,
+    naturalHeight: pdfNaturalHeight,
     onChangeSize,
     ref,
   });
@@ -65,7 +60,7 @@ export default function PdfViewer(props: Props) {
           embedRef.current.src = "";
           requestAnimationFrame(() => {
             if (embedRef.current) {
-              embedRef.current.src = href;
+              embedRef.current.src = sanitizeUrl(href) ?? "";
             }
           });
         }
@@ -103,12 +98,12 @@ export default function PdfViewer(props: Props) {
       </Flex>
       <embed
         title={name}
-        src={href}
+        src={sanitizeUrl(href)}
         ref={embedRef}
         style={{
           width: "100%",
           height: "auto",
-          aspectRatio: `${naturalWidth} / ${naturalHeight}`,
+          aspectRatio: `${pdfNaturalWidth} / ${pdfNaturalHeight}`,
           pointerEvents:
             !isEditable || (isSelected && !dragging) ? "initial" : "none",
           marginTop: 6,

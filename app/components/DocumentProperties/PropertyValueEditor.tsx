@@ -612,7 +612,7 @@ const RelationValueEditor = observer(function RelationValueEditor_({
           : undefined;
         const { rows } = await documents.fetchInDatabase({
           databaseId: targetDatabaseId,
-          filter: view?.filter,
+          propertyFilter: view?.filter,
           limit: 100,
         });
         setCandidateIds(rows.map((item) => item.id));

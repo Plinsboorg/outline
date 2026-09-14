@@ -26,7 +26,7 @@ function DocumentDatabase({ document }: Props) {
   // navigation paths where it has not run yet
   React.useEffect(() => {
     if (enabled && !databases.isLoaded && !databases.isFetching) {
-      void databases.fetchAll();
+      void databases.loadAll();
     }
   }, [enabled, databases]);
 

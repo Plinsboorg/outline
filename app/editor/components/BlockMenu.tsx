@@ -35,8 +35,8 @@ function useTemplateMenuItem(): MenuItem | undefined {
       return undefined;
     }
 
-    const allTemplates = templatesStore.orderedData.filter(
-      (template) => template.isActive
+    const allTemplates = templatesStore.published.filter(
+      (template) => !!template.data
     );
     const hasTemplates = allTemplates.some(
       (template) =>
@@ -102,7 +102,7 @@ function useTemplateMenuItem(): MenuItem | undefined {
       keywords: "template",
       children,
     } satisfies MenuItem;
-  }, [user, templatesStore.orderedData, collectionId, editor, t]);
+  }, [user, templatesStore.published, collectionId, editor, t]);
 }
 
 /**
@@ -163,7 +163,7 @@ function BlockMenu(props: Props) {
     return [...baseItems, { name: "separator" } as MenuItem, ...extraItems];
   }, [t, elementRef, templateMenuItem, databaseMenuItem]);
 
-  const renderMenuItem = useCallback(
+  const renderMenuItem = useCallback<SuggestionsMenuProps["renderMenuItem"]>(
     (item, _index, options) => (
       <SuggestionsMenuItem
         {...options}

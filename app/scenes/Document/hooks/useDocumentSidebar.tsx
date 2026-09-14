@@ -91,7 +91,10 @@ export default function useDocumentSidebar() {
     path: matchDocumentHistory,
   });
   const panel = ui.getRightSidebar(pane);
-  const isOpen = panel !== null;
+  // A history panel outside of a history route is closed by the effect below,
+  // so it is treated as closed here – otherwise the sidebar renders open for a
+  // frame and then animates away again.
+  const isOpen = panel !== null && (panel !== "history" || isHistoryRoute);
   const wasOpenRef = React.useRef(isOpen);
 
   React.useEffect(() => {
@@ -116,13 +119,17 @@ export default function useDocumentSidebar() {
         ? documents.get(slugMatch.params.documentSlug)
         : undefined;
       if (document) {
-        paneHistory.push(documentPath(document));
+        paneHistory.push({
+          pathname: documentPath(document),
+          state: location.state,
+        });
       }
     }
   }, [
     panel,
     isHistoryRoute,
     location.pathname,
+    location.state,
     documents,
     paneHistory,
     ui,
