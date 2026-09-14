@@ -1,13 +1,16 @@
 name: Build fork image (ghcr)
 
-# Fork-local replacement for docker.yml, which targets upstream's Blacksmith
-# runners and Docker Hub namespace and cannot run here. amd64 only: the
-# deployment target is an x86 LXC container.
+# Fork-local replacement for upstream's docker.yml (deleted in this fork),
+# which targets Blacksmith runners and the Docker Hub namespace we do not own.
+# amd64 only: the deployment target is an x86 LXC container.
 
 on:
   push:
     branches:
+      - main
       - "feat/**"
+    tags:
+      - "v*"
   workflow_dispatch:
 
 env:
@@ -47,8 +50,9 @@ jobs:
       - name: Build runtime image
         run: |
           SHA="$(git rev-parse --short HEAD)"
-          # moving tag follows the branch, so each feature branch gets its own
-          # rather than every branch overwriting a single shared one
+          # Moving tag follows the ref: `main` for the default branch, the
+          # release name for a `v*` tag, one per feature branch otherwise —
+          # rather than every ref overwriting a single shared tag.
           BRANCH="${GITHUB_REF_NAME//\//-}"
           docker build \
             --file Dockerfile \
