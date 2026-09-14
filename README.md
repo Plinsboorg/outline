@@ -56,6 +56,50 @@ The feature is enabled by default and can be turned off per workspace under
 Design notes live in [`docs/document-databases-spec.md`](docs/document-databases-spec.md)
 (the original RFC, kept for its rationale) and the phase task logs alongside it.
 
+### Scale of the change, by feature
+
+Measured as `git diff upstream/main...main`, counting changed lines (added plus
+removed) at the point the fork last merged upstream. Roughly **22,500 lines
+across 130 files**, of which about 6,200 are tests. Shared modules that serve
+several features — `shared/utils/properties.ts`, `shared/types.ts` — are
+apportioned between them rather than charged to one, so the per-feature numbers
+are approximate; the total is not.
+
+| Feature | Lines | of which tests | Principally touches |
+| --- | ---: | ---: | --- |
+| **Database editor** — the views a database is read and edited through | 6,760 | 460 | `app/scenes/Database/`, `app/components/Database/DatabaseSchemaEditor.tsx` |
+| **Databases as documents** — the model, lifecycle and API | 4,925 | 2,115 | `server/models/Database.ts`, `server/routes/api/databases/`, 7 migrations, `app/stores/DatabasesStore.ts` |
+| **Query layer** — filtering, sorting, grouping and summaries in SQL | 2,590 | 1,465 | `server/models/helpers/{PropertyQueryHelper,SummaryHelper}.ts`, `server/routes/api/documents/` |
+| **Document properties** — typed fields on a document, edited inline | 2,435 | 280 | `app/components/DocumentProperties/`, `shared/utils/properties.ts`, `shared/editor/components/PropertyValueLabel.tsx` |
+| **Embedded database view** — a database rendered inside another document | 1,995 | 540 | `shared/editor/nodes/DatabaseBlock.tsx`, `app/editor/components/DatabaseBlockView.tsx`, `shared/utils/viewOverride.ts` |
+| **Relations and rollups** — links between databases, and values computed across them | 1,235 | 655 | `server/models/helpers/{RelationHelper,RollupHelper}.ts`, `server/queues/processors/RelationsProcessor.ts` |
+| **Rows in the sidebar** — rows, sub-items and drag-and-drop in the document tree | 1,105 | 170 | `app/components/Sidebar/components/DatabaseRowLinks.tsx`, `shared/utils/rowTree.ts`, `app/components/Sidebar/hooks/useDragAndDrop.tsx` |
+| **Wiring and shared types** — stores, actions, policies, presenters, settings | 820 | 215 | `shared/types.ts`, `app/actions/definitions/`, `server/policies/`, `server/presenters/` |
+| **Import and export** — properties as Markdown frontmatter | 605 | 255 | `server/utils/frontmatter.ts`, `server/converters/DocumentConverter.ts`, `server/models/helpers/DocumentHelper.tsx` |
+| **Realtime** — databases and rows over the websocket | 60 | — | `server/queues/processors/WebsocketsProcessor.ts`, `app/components/WebsocketProvider.tsx` |
+
+The editor is the largest piece, and splits further:
+
+| Inside the database editor | Lines |
+| --- | ---: |
+| View shell, tab bar, saved views | 1,450 |
+| Table layout | 1,265 |
+| Schema editing and the property menus | 1,450 |
+| View helpers — column order, visibility, widths | 450 |
+| Board layout | 410 |
+| List layout | 315 |
+| Gallery layout | 240 |
+| Filter bar | 240 |
+| Row menu and title cell | 200 |
+| Footer summaries | 165 |
+
+Two things worth reading off this. The four layouts together are about 2,230
+lines, so most of the editor is not the layouts themselves but the view shell
+and the schema editing they all share. And the work is split almost evenly
+between the two halves of the app — 9,075 lines under `app/`, 8,770 under
+`server/`, and 4,685 in `shared/` used by both. A feature that looks like UI
+is, in this codebase, about as much server as client.
+
 ### Status
 
 Usable and in daily use on a private instance, but young: it has not been
