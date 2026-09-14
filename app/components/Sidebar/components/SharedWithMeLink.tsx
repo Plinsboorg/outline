@@ -2,6 +2,7 @@ import fractionalIndex from "fractional-index";
 import type { Location } from "history";
 import { observer } from "mobx-react";
 import * as React from "react";
+import type { match } from "react-router";
 import { IconType, NotificationEventType } from "@shared/types";
 import { determineIconType } from "@shared/utils/icon";
 import type GroupMembership from "~/models/GroupMembership";
@@ -10,6 +11,7 @@ import { useActiveSidebarContext } from "~/hooks/useActiveSidebarContext";
 import useBoolean from "~/hooks/useBoolean";
 import useStores from "~/hooks/useStores";
 import DocumentMenu from "~/menus/DocumentMenu";
+import * as Scenes from "~/routes/scenes";
 import {
   useDragMembership,
   useDropToReorderUserMembership,
@@ -139,8 +141,10 @@ function SharedWithMeLink({ membership, depth = 0 }: Props) {
     useDropToReorderUserMembership(getIndex);
 
   const isActive = React.useCallback(
-    (match, location: Location<{ sidebarContext?: SidebarContextType }>) =>
-      !!match && location.state?.sidebarContext === sidebarContext,
+    (
+      match: match | null,
+      location: Location<{ sidebarContext?: SidebarContextType }>
+    ) => !!match && location.state?.sidebarContext === sidebarContext,
     [sidebarContext]
   );
 
@@ -181,6 +185,7 @@ function SharedWithMeLink({ membership, depth = 0 }: Props) {
       documentId={documentId ?? ""}
       document={document}
       to={{ pathname: document.path, state: { sidebarContext } }}
+      onClickIntent={Scenes.Document.preload}
       depth={depth}
       icon={icon}
       canEdit={false}

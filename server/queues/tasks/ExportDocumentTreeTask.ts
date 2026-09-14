@@ -8,20 +8,43 @@ import Logger from "@server/logging/Logger";
 import type { Collection } from "@server/models";
 import Attachment from "@server/models/Attachment";
 import Document from "@server/models/Document";
+import Team from "@server/models/Team";
 import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import HTMLHelper from "@server/models/helpers/HTMLHelper";
+import OKFHelper from "@server/models/helpers/OKFHelper";
 import { ProsemirrorHelper } from "@server/models/helpers/ProsemirrorHelper";
+import TextBundleHelper from "@server/models/helpers/TextBundleHelper";
+import { sequelizeReadOnly } from "@server/storage/database";
 import ZipHelper from "@server/utils/ZipHelper";
 import { serializeFilename } from "@server/utils/fs";
 import ExportTask from "./ExportTask";
 
 export default abstract class ExportDocumentTreeTask extends ExportTask {
   /**
+   * The extension given to each document's entry in the archive. For TextBundle
+   * this names a directory rather than a file.
+   *
+   * @param format The format being exported.
+   * @returns The extension, without a leading dot.
+   */
+  private static extensionForFormat(format: FileOperationFormat): string {
+    switch (format) {
+      case FileOperationFormat.HTMLZip:
+        return "html";
+      case FileOperationFormat.TextBundleZip:
+        return TextBundleHelper.bundleExtension;
+      default:
+        return "md";
+    }
+  }
+
+  /**
    * Exports the document tree to the given zip instance.
    *
    * @param zip The yazl ZipFile to add files to
    * @param documentId The document ID to export
-   * @param pathInZip The path in the zip to add the document to
+   * @param pathInZip The path in the zip to add the document to. For TextBundle
+   *   this is the bundle directory rather than a file.
    * @param format The format to export in
    */
   protected async processDocument({
@@ -31,6 +54,7 @@ export default abstract class ExportDocumentTreeTask extends ExportTask {
     format,
     includeAttachments,
     pathMap,
+    origin,
   }: {
     zip: ZipFile;
     pathInZip: string;
@@ -38,33 +62,55 @@ export default abstract class ExportDocumentTreeTask extends ExportTask {
     format: FileOperationFormat;
     includeAttachments: boolean;
     pathMap: Map<string, string>;
+    origin?: string;
   }) {
     Logger.debug("task", `Adding document to archive`, { documentId });
-    const document = await Document.findByPk(documentId);
-    if (!document) {
+    const result = await sequelizeReadOnly.transaction(async (transaction) => {
+      const document = await Document.findByPk(documentId, { transaction });
+      if (!document) {
+        return;
+      }
+
+      const attachmentIds = includeAttachments
+        ? ProsemirrorHelper.parseAttachmentIds(
+            DocumentHelper.toProsemirror(document)
+          )
+        : [];
+      const attachments = attachmentIds.length
+        ? await Attachment.findAll({
+            where: {
+              teamId: document.teamId,
+              id: attachmentIds,
+            },
+            transaction,
+          })
+        : [];
+
+      return { attachments, document };
+    });
+
+    if (!result) {
       return;
     }
+
+    const { attachments, document } = result;
 
     let text =
       format === FileOperationFormat.HTMLZip
         ? await DocumentHelper.toHTML(document, { centered: true })
         : await DocumentHelper.toMarkdown(document, {
             includeProperties: true,
+            commonMark: true,
           });
 
-    const attachmentIds = includeAttachments
-      ? ProsemirrorHelper.parseAttachmentIds(
-          DocumentHelper.toProsemirror(document)
-        )
-      : [];
-    const attachments = attachmentIds.length
-      ? await Attachment.findAll({
-          where: {
-            teamId: document.teamId,
-            id: attachmentIds,
-          },
-        })
-      : [];
+    const isTextBundle = format === FileOperationFormat.TextBundleZip;
+
+    // A TextBundle is a directory, so its text and assets sit inside the path
+    // reserved for the document rather than beside it.
+    const textPathInZip = isTextBundle
+      ? path.join(pathInZip, TextBundleHelper.textFileName)
+      : pathInZip;
+    const usedAssetNames = new Set<string>();
 
     // Add any referenced attachments to the zip file and replace the
     // reference in the document with the path to the attachment in the zip
@@ -125,15 +171,23 @@ export default abstract class ExportDocumentTreeTask extends ExportTask {
         }
       }
 
+      // TextBundle requires assets to live in the bundle's own assets folder,
+      // referenced relative to the text file, rather than at their storage key.
+      const reference = isTextBundle
+        ? TextBundleHelper.assetPath(attachment.name, usedAssetNames)
+        : attachment.key;
+
       this.addAttachmentToArchive(
         zip,
         attachment,
-        path.join(dir, attachment.key)
+        isTextBundle
+          ? path.join(pathInZip, reference)
+          : path.join(dir, reference)
       );
 
       text = text.replace(
         new RegExp(escapeRegExp(attachment.redirectUrl), "g"),
-        encodeURI(attachment.key)
+        encodeURI(reference)
       );
     }
 
@@ -146,7 +200,7 @@ export default abstract class ExportDocumentTreeTask extends ExportTask {
       const matchedDocPath = pathMap.get(matchedLink);
 
       if (matchedDocPath) {
-        const relativePath = path.relative(pathInZip, matchedDocPath);
+        const relativePath = path.relative(textPathInZip, matchedDocPath);
         if (relativePath.startsWith(".")) {
           text = text.replace(
             matchedLink,
@@ -156,8 +210,22 @@ export default abstract class ExportDocumentTreeTask extends ExportTask {
       }
     });
 
+    if (isTextBundle) {
+      zip.addBuffer(
+        Buffer.from(TextBundleHelper.info(document)),
+        path.join(pathInZip, TextBundleHelper.infoFileName),
+        { mtime: document.updatedAt }
+      );
+    }
+
+    // OKF frontmatter carries the document's canonical URL, so it is added
+    // only after internal links have been rewritten to relative paths.
+    if (format === FileOperationFormat.OKFZip && origin) {
+      text = OKFHelper.frontmatter(document, origin) + text;
+    }
+
     // Finally, add the document to the zip file
-    zip.addBuffer(Buffer.from(text), pathInZip, {
+    zip.addBuffer(Buffer.from(text), textPathInZip, {
       mtime: document.updatedAt,
       fileComment: JSON.stringify({
         createdAt: document.createdAt,
@@ -182,15 +250,33 @@ export default abstract class ExportDocumentTreeTask extends ExportTask {
     format: FileOperationFormat,
     includeAttachments = true
   ) {
-    const pathMap = this.createPathMap(collections, format);
-    return await ZipHelper.toTmpFile((zip) =>
-      this.addDocumentsToArchive({
+    const { pathMap, roots } = this.createPathMap(collections, format);
+    const origin = await this.originForFormat(format, collections[0]?.teamId);
+    return await ZipHelper.toTmpFile(async (zip) => {
+      await this.addDocumentsToArchive({
         zip,
         pathMap,
         format,
         includeAttachments,
-      })
-    );
+        origin,
+      });
+
+      if (format === FileOperationFormat.OKFZip) {
+        zip.addBuffer(
+          Buffer.from(
+            OKFHelper.rootIndex(
+              "Collections",
+              roots.map(({ root, collection }) => ({
+                title: collection.name,
+                path: `${root}/`,
+                description: collection.description,
+              }))
+            )
+          ),
+          OKFHelper.indexFileName
+        );
+      }
+    });
   }
 
   protected async addDocumentToArchive({
@@ -206,27 +292,64 @@ export default abstract class ExportDocumentTreeTask extends ExportTask {
   }) {
     const pathMap = new Map<string, string>();
 
-    const extension = format === FileOperationFormat.HTMLZip ? "html" : "md";
     const rootFolderName = serializeFilename(document.titleWithDefault);
+    const rootPath = `${rootFolderName}.${ExportDocumentTreeTask.extensionForFormat(format)}`;
 
     // entry for root document
-    pathMap.set(document.path, `${rootFolderName}.${extension}`);
+    pathMap.set(document.path, rootPath);
 
     this.addDocumentTreeToPathMap(
       pathMap,
       documentStructure,
-      serializeFilename(document.titleWithDefault),
+      rootFolderName,
       format
     );
 
-    return await ZipHelper.toTmpFile((zip) =>
-      this.addDocumentsToArchive({
+    const origin = await this.originForFormat(format, document.teamId);
+    return await ZipHelper.toTmpFile(async (zip) => {
+      await this.addDocumentsToArchive({
         zip,
         pathMap,
         format,
         includeAttachments,
-      })
-    );
+        origin,
+      });
+
+      if (format === FileOperationFormat.OKFZip) {
+        zip.addBuffer(
+          Buffer.from(
+            OKFHelper.rootIndex("Documents", [
+              {
+                title: document.titleWithDefault,
+                path: rootPath,
+                description: document.getSummary(),
+              },
+            ])
+          ),
+          OKFHelper.indexFileName
+        );
+      }
+    });
+  }
+
+  /**
+   * Resolves the origin used for canonical document URLs, which only the OKF
+   * format writes into its output.
+   *
+   * @param format The format to export in
+   * @param teamId The team that owns the exported documents
+   * @returns The team's URL origin, or undefined when the format has no use for it.
+   */
+  private async originForFormat(
+    format: FileOperationFormat,
+    teamId?: string
+  ): Promise<string | undefined> {
+    if (format !== FileOperationFormat.OKFZip || !teamId) {
+      return undefined;
+    }
+
+    const team = await Team.findByPk(teamId, { rejectOnEmpty: true });
+    return team.url;
   }
 
   /**
@@ -236,17 +359,20 @@ export default abstract class ExportDocumentTreeTask extends ExportTask {
    * @param pathMap Map of document urls to their path in the zip
    * @param format The format to export in
    * @param includeAttachments Whether to include attachments in the export
+   * @param origin The origin for canonical document URLs, when the format needs one
    */
   private async addDocumentsToArchive({
     zip,
     pathMap,
     format,
     includeAttachments,
+    origin,
   }: {
     zip: ZipFile;
     pathMap: Map<string, string>;
     format: FileOperationFormat;
     includeAttachments: boolean;
+    origin?: string;
   }) {
     const processedPaths = new Set<string>();
 
@@ -267,6 +393,7 @@ export default abstract class ExportDocumentTreeTask extends ExportTask {
         includeAttachments,
         format,
         pathMap,
+        origin,
       });
     }
 
@@ -278,25 +405,26 @@ export default abstract class ExportDocumentTreeTask extends ExportTask {
    *
    * @param collections The collections to generate the path map for.
    * @param format The format of the exported documents.
+   * @returns The path map and the root directory chosen for each collection.
    */
   private createPathMap(
     collections: Collection[],
     format: FileOperationFormat
   ) {
-    const map = new Map<string, string>();
-    const usedRoots = new Set<string>();
+    const pathMap = new Map<string, string>();
+    const roots: { root: string; collection: Collection }[] = [];
 
     for (const collection of collections) {
       if (collection.documentStructure) {
         let root = serializeFilename(collection.name);
         let i = 0;
-        while (usedRoots.has(root)) {
+        while (roots.some((entry) => entry.root === root)) {
           root = `${serializeFilename(collection.name)} (${++i})`;
         }
-        usedRoots.add(root);
+        roots.push({ root, collection });
 
         this.addDocumentTreeToPathMap(
-          map,
+          pathMap,
           collection.documentStructure,
           root,
           format
@@ -304,7 +432,7 @@ export default abstract class ExportDocumentTreeTask extends ExportTask {
       }
     }
 
-    return map;
+    return { pathMap, roots };
   }
 
   private addDocumentTreeToPathMap(
@@ -315,13 +443,18 @@ export default abstract class ExportDocumentTreeTask extends ExportTask {
   ) {
     for (const node of nodes) {
       const title = serializeFilename(node.title) || "Untitled";
-      const extension = format === FileOperationFormat.HTMLZip ? "html" : "md";
+      const extension = ExportDocumentTreeTask.extensionForFormat(format);
 
       // Ensure the document is given a unique path in zip, even if it has
-      // the same title as another document in the same collection.
+      // the same title as another document in the same collection. OKF also
+      // reserves some file names, which a document may not take.
       let i = 0;
       let filePath = path.join(root, `${title}.${extension}`);
-      while (Array.from(map.values()).includes(filePath)) {
+      while (
+        Array.from(map.values()).includes(filePath) ||
+        (format === FileOperationFormat.OKFZip &&
+          OKFHelper.isReservedFileName(path.basename(filePath)))
+      ) {
         filePath = path.join(root, `${title} (${++i}).${extension}`);
       }
 

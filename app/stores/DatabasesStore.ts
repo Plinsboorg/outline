@@ -1,5 +1,5 @@
 import invariant from "invariant";
-import { action, computed, runInAction } from "mobx";
+import { action, makeObservable, override, runInAction } from "mobx";
 import type { DataView, JSONObject, Property } from "@shared/types";
 import { mirroredRelationTargetIds } from "@shared/utils/properties";
 import Database from "~/models/Database";
@@ -12,6 +12,7 @@ import Store from "./base/Store";
 export default class DatabasesStore extends Store<Database> {
   constructor(rootStore: RootStore) {
     super(rootStore, Database);
+    makeObservable(this);
   }
 
   /**
@@ -23,6 +24,7 @@ export default class DatabasesStore extends Store<Database> {
    * @param options extra request parameters.
    * @returns the created database.
    */
+  @override
   create(
     params: Properties<Database> & {
       collectionId?: string;
@@ -40,9 +42,14 @@ export default class DatabasesStore extends Store<Database> {
    *
    * @param params the collection to limit results to, if any.
    * @returns the loaded databases.
+   *
+   * Not named `fetchAll`: the base store declares that as an annotated field,
+   * and MobX 6 cannot redeclare one in a subclass — the field initializer
+   * assigns over a property `makeObservable` has already sealed. It also reads
+   * a different response shape than the base's paginated fetch.
    */
   @action
-  fetchAll = async (params?: {
+  loadAll = async (params?: {
     collectionId?: string;
     archived?: boolean;
   }): Promise<Database[]> => {
@@ -53,7 +60,7 @@ export default class DatabasesStore extends Store<Database> {
       invariant(res?.data, "Data not available");
 
       let models: Database[] = [];
-      runInAction("DatabasesStore#fetchAll", () => {
+      runInAction(() => {
         models = res.data.map(this.add);
         this.addPolicies(res.policies);
         if (!params?.collectionId && !params?.archived) {
@@ -170,7 +177,7 @@ export default class DatabasesStore extends Store<Database> {
         ...(parentDocumentId !== undefined ? { parentDocumentId } : {}),
       });
     } catch (error) {
-      runInAction("DatabasesStore#moveRow", () => {
+      runInAction(() => {
         document.databaseIndex = previousIndex;
         if (parentDocumentId !== undefined) {
           document.parentDocumentId = previousParentId;
@@ -180,7 +187,7 @@ export default class DatabasesStore extends Store<Database> {
     }
   };
 
-  @computed
+  @override
   get orderedData(): Database[] {
     return Array.from(this.data.values()).sort((a, b) =>
       a.createdAt && b.createdAt

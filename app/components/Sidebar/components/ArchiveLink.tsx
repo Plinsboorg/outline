@@ -1,6 +1,7 @@
 import { isUndefined } from "es-toolkit/compat";
 import { observer } from "mobx-react";
 import { ArchiveIcon } from "outline-icons";
+import type * as React from "react";
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import Flex from "@shared/components/Flex";
@@ -8,6 +9,7 @@ import type Collection from "~/models/Collection";
 import PaginatedList from "~/components/PaginatedList";
 import useRequest from "~/hooks/useRequest";
 import useStores from "~/hooks/useStores";
+import * as Scenes from "~/routes/scenes";
 import { archivePath } from "~/utils/routeHelpers";
 import { useDropToArchive } from "../hooks/useDragAndDrop";
 import { ArchivedCollectionLink } from "./ArchivedCollectionLink";
@@ -23,6 +25,8 @@ function ArchiveLink() {
 
   const [disclosure, setDisclosure] = useState<boolean>(false);
   const [expanded, setExpanded] = useState<boolean | undefined>();
+  const archivedCollections = collections.archived;
+  const hasArchivedCollections = archivedCollections.length > 0;
 
   const { data, loading, error } = useRequest(collections.fetchArchived, true);
 
@@ -33,8 +37,8 @@ function ArchiveLink() {
   }, [data, loading, error]);
 
   useEffect(() => {
-    setDisclosure(collections.archived.length > 0);
-  }, [collections.archived]);
+    setDisclosure(hasArchivedCollections);
+  }, [hasArchivedCollections]);
 
   useEffect(() => {
     if (disclosure && isUndefined(expanded)) {
@@ -42,11 +46,14 @@ function ArchiveLink() {
     }
   }, [disclosure, expanded]);
 
-  const handleDisclosureClick = useCallback((ev) => {
-    ev.preventDefault();
-    ev.stopPropagation();
-    setExpanded((e) => !e);
-  }, []);
+  const handleDisclosureClick = useCallback(
+    (ev: React.MouseEvent<HTMLElement>) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      setExpanded((e) => !e);
+    },
+    []
+  );
 
   const handleClick = useCallback(() => {
     setExpanded(true);
@@ -61,6 +68,7 @@ function ArchiveLink() {
         <div ref={dropToArchiveRef}>
           <SidebarLink
             to={archivePath()}
+            onClickIntent={Scenes.Archive.preload}
             icon={<ArchiveIcon open={isOverArchiveSection && isDragging} />}
             exact={false}
             label={t("Archive")}
@@ -76,7 +84,7 @@ function ArchiveLink() {
             <PaginatedList<Collection>
               aria-label={t("Archived collections")}
               fetch={collections.fetchArchived}
-              items={collections.archived}
+              items={archivedCollections}
               loading={<PlaceholderCollections />}
               renderError={(props) => <StyledError {...props} />}
               renderItem={(item) => (

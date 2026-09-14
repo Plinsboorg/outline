@@ -36,7 +36,7 @@ function Collections() {
   );
   useEffect(() => {
     if (databasesEnabled && !databases.isLoaded && !databases.isFetching) {
-      void databases.fetchAll();
+      void databases.loadAll();
     }
   }, [databasesEnabled, databases]);
 

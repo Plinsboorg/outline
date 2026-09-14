@@ -97,7 +97,7 @@ function DocumentScene({
   );
   React.useEffect(() => {
     if (databasesEnabled && !databases.isLoaded && !databases.isFetching) {
-      void databases.fetchAll();
+      void databases.loadAll();
     }
   }, [databasesEnabled, databases]);
 
@@ -219,6 +219,37 @@ function DocumentScene({
     [readOnly, abilities.update, history, document, sidebarContext]
   );
 
+  // Files dropped in the margins around the document are inserted at the
+  // closest point in the editor, rather than being ignored by the browser.
+  const isFileDrag = useCallback(
+    (event: React.DragEvent<HTMLElement>) =>
+      !readOnly && !revision && event.dataTransfer.types.includes("Files"),
+    [readOnly, revision]
+  );
+
+  const handleDragOver = useCallback(
+    (event: React.DragEvent<HTMLElement>) => {
+      if (isFileDrag(event)) {
+        event.dataTransfer.dropEffect = "copy";
+        event.preventDefault();
+      }
+    },
+    [isFileDrag]
+  );
+
+  const handleDrop = useCallback(
+    (event: React.DragEvent<HTMLElement>) => {
+      // A drop that landed inside the editor has already been handled.
+      if (event.defaultPrevented || !isFileDrag(event)) {
+        return;
+      }
+      // Prevent the browser from navigating to the file if it cannot be added.
+      event.preventDefault();
+      void editorRef.current?.insertDroppedContent(event);
+    },
+    [isFileDrag]
+  );
+
   const goToHistory = useCallback(
     (ev: KeyboardEvent) => {
       if (!readOnly) {
@@ -332,13 +363,15 @@ function DocumentScene({
       <MeasuredContainer
         as={Background}
         name="container"
-        key={revision ? revision.id : document.id}
         column
         auto
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        data-drop-area
       >
         <PageTitle title={pageTitle} favicon={favicon} />
         {(isUploading || isSaving) && <LoadingIndicator />}
-        <Container column>
+        <Container column auto>
           {!readOnly && (
             <Prompt
               when={isUploading && !isEditorDirty}
@@ -351,7 +384,6 @@ function DocumentScene({
             <SharedHeader document={document} />
           ) : (
             <Header
-              editorRef={editorRef}
               document={document}
               revision={revision}
               isDraft={document.isDraft}
