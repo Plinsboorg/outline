@@ -32,6 +32,10 @@ COPY --from=base --chown=nodejs:nodejs $APP_PATH/public ./public
 COPY --from=base --chown=nodejs:nodejs $APP_PATH/.sequelizerc ./.sequelizerc
 COPY --from=base --chown=nodejs:nodejs $APP_PATH/node_modules ./node_modules
 COPY --from=base --chown=nodejs:nodejs $APP_PATH/package.json ./package.json
+# The Business Source License requires this License to be conspicuously
+# displayed on every copy of the work, and an image published from a fork is
+# a copy that people receive on its own, without the repository around it.
+COPY --from=base --chown=nodejs:nodejs $APP_PATH/LICENSE ./LICENSE
 # Install wget to healthcheck the server
 RUN  apt-get update \
     && apt-get install -y wget \

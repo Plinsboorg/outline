@@ -1,19 +1,10 @@
+<h1 align="center">Outline, with document databases</h1>
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./public/logos/outline-logo-dark.png" height="29">
-    <source media="(prefers-color-scheme: light)" srcset="./public/logos/outline-logo-light.png" height="29">
-    <img src="./public/logos/outline-logo-light.png" height="29" alt="Outline" />
-  </picture>
-</p>
-<p align="center">
-  <i>A fast, collaborative, knowledge base for your team built using React and Node.js.<br/>Try out Outline using our hosted version at <a href="https://www.getoutline.com">www.getoutline.com</a>.</i>
-  <br/>
-  <img width="1640" alt="screenshot" src="https://user-images.githubusercontent.com/380914/110356468-26374600-7fef-11eb-9f6a-f2cc2c8c6590.png">
+  <i>An unofficial fork of <a href="https://github.com/outline/outline">Outline</a> — the fast, collaborative knowledge base built with React and Node.js — adding typed document properties and database views.<br/>Not affiliated with or endorsed by General Outline, Inc. The upstream project is at <a href="https://www.getoutline.com">www.getoutline.com</a>.</i>
 </p>
 <p align="center">
   <a href="http://www.typescriptlang.org" rel="nofollow"><img src="https://img.shields.io/badge/%3C%2F%3E-TypeScript-%230074c1.svg" alt="TypeScript"></a>
   <a href="https://github.com/styled-components/styled-components"><img src="https://img.shields.io/badge/style-%F0%9F%92%85%20styled--components-orange.svg" alt="Styled Components"></a>
-  <a href="https://translate.getoutline.com/project/outline" alt="Localized"><img src="https://badges.crowdin.net/outline/localized.svg"></a>
 </p>
 
 ---
@@ -100,6 +91,47 @@ between the two halves of the app — 9,075 lines under `app/`, 8,770 under
 `server/`, and 4,685 in `shared/` used by both. A feature that looks like UI
 is, in this codebase, about as much server as client.
 
+### The path back upstream
+
+This fork is not meant to be permanent. The goal is for document databases to
+land in Outline itself, and the fork exists because the first attempt at that
+did not work.
+
+[Upstream PR #13210](https://github.com/outline/outline/pull/13210) put the
+whole feature up for review in one piece and was declined — reasonably, on
+size. Nobody can review twenty thousand lines in one sitting, and the feature
+was not finished enough to be worth asking anyone to try. So the plan changed:
+develop it here until it is genuinely good, then split it into changes that can
+each be reviewed on their own merits and proposed one at a time.
+
+The table above is the first draft of that split. What it shows is that the
+feature is not one thing:
+
+- **Document properties** is the natural first piece. At roughly 2,400 lines it
+  is the smallest self-contained layer, it is useful on its own — typed fields
+  on a document, editable inline, exported as frontmatter — and everything else
+  depends on it rather than the other way round.
+- **The database model and query layer** are next, and are what earn the
+  feature its keep. They are also where a maintainer will have the strongest
+  opinions, since they touch the document model and the list endpoint.
+- **The editor's layouts** can arrive one at a time. Table alone is about 1,265
+  lines on top of the shared view shell, so a first proposal need not carry
+  board, list and gallery with it.
+- **Relations, rollups, embedded views and the sidebar tree** are genuinely
+  optional and can come last, or not at all.
+
+That sequence is a plan, not a promise. Practically, each piece will need
+rewriting rather than replaying — the history here is twenty-two rounds of
+iteration, which is the wrong shape for review, and upstream's own APIs have
+moved under it since (this fork merged Outline 1.10.1 and adopted its filter
+DSL conventions along the way). What the fork provides is a working
+implementation to cut those pieces from, and somewhere for the feature to be
+used and criticised in the meantime.
+
+Contributions aimed at making a piece of this mergeable are especially welcome.
+So is the news that the maintainers would rather it were structured a different
+way.
+
 ### Status
 
 Usable and in daily use on a private instance, but young: it has not been
@@ -134,11 +166,31 @@ always exactly this fork's changes.
 
 ### License
 
-Unchanged from upstream: the [Business Source License 1.1](LICENSE), which
-converts to Apache 2.0 on **2030-07-13**. A fork cannot relicense it, so the
-same terms bind you — in particular the Additional Use Grant, which permits
-self-hosting but not offering the software to third parties as a commercial
-"Document Service". Read the [LICENSE](LICENSE) before deploying commercially.
+Unchanged from upstream: the [Business Source License 1.1](LICENSE). A fork
+cannot relicense the work, so the same terms bind you.
+
+BSL 1.1 grants the right to "copy, modify, create derivative works,
+redistribute, and make non-production use" outright — which is what this fork
+is — and Outline's Additional Use Grant extends that to production use, with
+one exclusion: you may not run the work as a **Document Service**, defined as
+a commercial offering that lets third parties create their own teams and
+documents. Self-hosting for your own organisation is fine; reselling it as a
+hosted wiki is not.
+
+Two details that catch people out:
+
+- **The Change Date tracks the version**, and moves every time this fork
+  merges upstream. The license applies separately to each version, so the
+  currently vendored one is what counts: at Outline **1.10.1** it converts to
+  Apache 2.0 on **2030-09-09**. Read [LICENSE](LICENSE) rather than this
+  paragraph, which will go stale.
+- **The license grants no rights in Outline's trademarks or logos.** This
+  fork's use of the name is nominative — it describes what the software is
+  derived from. It is not endorsed by, or affiliated with, General Outline,
+  Inc.
+
+The license must be displayed on every copy, so it ships inside the container
+image as well as in this repository.
 
 ---
 
