@@ -9313,7 +9313,7 @@ describe("#documents.list property filters", () => {
     const { user, database } = await buildFixture();
     const { status, titles } = await list(user, {
       databaseId: database.id,
-      filter: {
+      propertyFilter: {
         conjunction: "and",
         conditions: [{ propertyId: statusId, operator: "is", value: "todo" }],
       },
@@ -9326,7 +9326,7 @@ describe("#documents.list property filters", () => {
     const { user, database } = await buildFixture();
     const { titles } = await list(user, {
       databaseId: database.id,
-      filter: {
+      propertyFilter: {
         conjunction: "or",
         conditions: [
           { propertyId: statusId, operator: "is", value: "done" },
@@ -9341,7 +9341,7 @@ describe("#documents.list property filters", () => {
     const { user, database } = await buildFixture();
     const { titles } = await list(user, {
       databaseId: database.id,
-      filter: {
+      propertyFilter: {
         conjunction: "and",
         conditions: [{ propertyId: priorityId, operator: "gte", value: 3 }],
       },
@@ -9353,7 +9353,7 @@ describe("#documents.list property filters", () => {
     const { user, database } = await buildFixture();
     const { titles } = await list(user, {
       databaseId: database.id,
-      filter: {
+      propertyFilter: {
         conjunction: "and",
         conditions: [{ propertyId: tagsId, operator: "contains", value: "b" }],
       },
@@ -9365,7 +9365,7 @@ describe("#documents.list property filters", () => {
     const { user, database } = await buildFixture();
     const { titles } = await list(user, {
       databaseId: database.id,
-      filter: {
+      propertyFilter: {
         conjunction: "and",
         conditions: [
           { propertyId: notesId, operator: "contains", value: "ALPHA" },
@@ -9379,7 +9379,7 @@ describe("#documents.list property filters", () => {
     const { user, database } = await buildFixture();
     const empty = await list(user, {
       databaseId: database.id,
-      filter: {
+      propertyFilter: {
         conjunction: "and",
         conditions: [{ propertyId: statusId, operator: "isEmpty" }],
       },
@@ -9388,7 +9388,7 @@ describe("#documents.list property filters", () => {
 
     const notEmpty = await list(user, {
       databaseId: database.id,
-      filter: {
+      propertyFilter: {
         conjunction: "and",
         conditions: [{ propertyId: statusId, operator: "isNotEmpty" }],
       },
@@ -9400,7 +9400,7 @@ describe("#documents.list property filters", () => {
     const { user, database } = await buildFixture();
     const before = await list(user, {
       databaseId: database.id,
-      filter: {
+      propertyFilter: {
         conjunction: "and",
         conditions: [
           { propertyId: dueId, operator: "before", value: "2026-03-01" },
@@ -9411,7 +9411,7 @@ describe("#documents.list property filters", () => {
 
     const after = await list(user, {
       databaseId: database.id,
-      filter: {
+      propertyFilter: {
         conjunction: "and",
         conditions: [
           { propertyId: dueId, operator: "after", value: "2026-03-01" },
@@ -9441,7 +9441,7 @@ describe("#documents.list property filters", () => {
     const res = await server.post("/api/documents.list", user, {
       body: {
         databaseId: database.id,
-        filter: {
+        propertyFilter: {
           conjunction: "and",
           conditions: [{ propertyId: statusId, operator: "isNotEmpty" }],
         },
@@ -9528,7 +9528,7 @@ describe("#documents.list property filters", () => {
   it("should fail without a databaseId", async () => {
     const { user } = await buildFixture();
     const { status } = await list(user, {
-      filter: {
+      propertyFilter: {
         conjunction: "and",
         conditions: [{ propertyId: statusId, operator: "isEmpty" }],
       },
@@ -9545,7 +9545,7 @@ describe("#documents.list property filters", () => {
     });
     const { status } = await list(user, {
       databaseId: database.id,
-      filter: {
+      propertyFilter: {
         conjunction: "and",
         conditions: [{ propertyId: statusId, operator: "isEmpty" }],
       },
@@ -9557,7 +9557,7 @@ describe("#documents.list property filters", () => {
     const { user, database } = await buildFixture();
     const { status } = await list(user, {
       databaseId: database.id,
-      filter: {
+      propertyFilter: {
         conjunction: "and",
         conditions: [
           {
@@ -9578,7 +9578,7 @@ describe("#documents.list property filters", () => {
     const outsider = await buildUser({ teamId: otherTeam.id });
     const { status } = await list(outsider, {
       databaseId: database.id,
-      filter: {
+      propertyFilter: {
         conjunction: "and",
         conditions: [{ propertyId: statusId, operator: "isEmpty" }],
       },

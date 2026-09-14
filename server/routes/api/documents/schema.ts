@@ -178,9 +178,10 @@ export const DocumentsListSchema = BaseSchema.extend({
 
     /**
      * Structured filter over document properties. Requires databaseId and
-     * the document databases feature.
+     * the document databases feature. Named apart from `filters`, which is
+     * upstream's filter DSL over document fields.
      */
-    filter: FilterGroupSchema.optional(),
+    propertyFilter: FilterGroupSchema.optional(),
 
     /**
      * Sort levels over document properties, applied before `sort`. Requires

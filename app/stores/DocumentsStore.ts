@@ -42,7 +42,7 @@ import { extname, uploadFile } from "~/utils/files";
 type FetchPageParams = PaginationParams & {
   template?: boolean;
   collectionId?: string;
-  filter?: FilterGroup;
+  propertyFilter?: FilterGroup;
   propertySorts?: DataViewSort[];
 };
 
@@ -415,7 +415,7 @@ export default class DocumentsStore extends Store<Document> {
   fetchInDatabase = async (
     options: {
       databaseId: string;
-      filter?: FilterGroup;
+      propertyFilter?: FilterGroup;
       propertySorts?: DataViewSort[];
       /** The column summaries to compute, keyed by property id. */
       summaries?: Record<string, SummaryAggregation>;

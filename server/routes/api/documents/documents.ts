@@ -229,7 +229,7 @@ router.post(
       statusFilter,
       filters: rawFilters,
       databaseId,
-      filter: rawPropertyFilter,
+      propertyFilter: rawPropertyFilter,
       propertySorts,
       summariesForViewId,
       summaries: summaryColumns,
