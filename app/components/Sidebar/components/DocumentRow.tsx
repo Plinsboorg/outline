@@ -332,6 +332,10 @@ const Draggable = styled.div<{ $isDragging?: boolean; $isMoving?: boolean }>`
   transition: opacity 250ms ease;
   opacity: ${(props) => (props.$isDragging || props.$isMoving ? 0.1 : 1)};
   pointer-events: ${(props) => (props.$isMoving ? "none" : "inherit")};
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: pan-y;
 `;
 
 export default observer(DocumentRow);
