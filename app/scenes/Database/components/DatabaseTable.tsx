@@ -110,9 +110,6 @@ type Props = {
   parentRowIds: ReadonlySet<string>;
   /** Ids of rows whose sub-items are currently shown. */
   expandedRowIds: ReadonlySet<string>;
-  /** The rows whose open sub-item list ends after a given row, innermost
-   * first — each gets a button to add one more sub-item. */
-  listEndsAfter: ReadonlyMap<string, Document[]>;
   /** Callback toggling a row's sub-items open or closed. */
   onToggleRowExpand: (rowId: string) => void;
   /** Callback creating a sub-item under a row; absent when not allowed. */
@@ -170,7 +167,6 @@ function DatabaseTable({
   rowDepths,
   parentRowIds,
   expandedRowIds,
-  listEndsAfter,
   onToggleRowExpand,
   onAddSubItem,
   propertiesToggle,
@@ -188,14 +184,24 @@ function DatabaseTable({
   // Virtualizer: only render rows that are within (or near) the viewport.
   // We need the distance from the top of the document to the tbody so the
   // virtualizer can convert scroll position to row indices.
+  //
+  // tbodyTop is re-measured whenever any element on the page changes size
+  // (e.g. images load, the editor collapses) so the virtualizer always has
+  // an accurate scroll margin and never renders the wrong rows.
   const tbodyRef = React.useRef<HTMLTableSectionElement>(null);
   const [tbodyTop, setTbodyTop] = React.useState(0);
   React.useLayoutEffect(() => {
-    if (tbodyRef.current) {
-      setTbodyTop(
-        tbodyRef.current.getBoundingClientRect().top + window.scrollY
-      );
-    }
+    const measure = () => {
+      if (tbodyRef.current) {
+        setTbodyTop(
+          tbodyRef.current.getBoundingClientRect().top + window.scrollY
+        );
+      }
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(document.body);
+    return () => observer.disconnect();
   }, []);
 
   const rowVirtualizer = useWindowVirtualizer({
@@ -388,28 +394,6 @@ function DatabaseTable({
               wrappedColumnIds={wrappedColumnIds}
               onPeekOpen={onPeekOpen}
             />
-            {/* an open sub-item list gets its own footer button, so sub-items
-                can be added one after another without reaching for a menu */}
-            {onAddSubItem &&
-              listEndsAfter.get(document.id)?.map((parent) => (
-                <tr key={`add-${parent.id}`}>
-                  <NewRowCell colSpan={columnCount}>
-                    <NewRowButton
-                      type="button"
-                      onClick={() => onAddSubItem(parent)}
-                      width="100%"
-                      height={32}
-                      style={{
-                        paddingLeft:
-                          ((rowDepths.get(parent.id) ?? 0) + 1) * 20,
-                      }}
-                    >
-                      <PlusIcon size={18} />
-                      {t("New sub-item")}
-                    </NewRowButton>
-                  </NewRowCell>
-                </tr>
-              ))}
           </React.Fragment>
         );
       })}
@@ -460,15 +444,22 @@ function DatabaseTable({
   const totalWidth =
     (hasGripColumn ? GRIP_COLUMN_WIDTH : 0) +
     (hasControlsColumn ? CONTROLS_COLUMN_WIDTH : 0) +
-    columnIds.reduce(
-      (sum, id) =>
+    columnIds.reduce((sum, id) => {
+      const stored = widthFor(id);
+      if (stored) {
+        return sum + stored;
+      }
+      if (id === TITLE_COLUMN_ID) {
+        return sum + DEFAULT_TITLE_WIDTH;
+      }
+      const prop = properties.find((p) => p.id === id);
+      return (
         sum +
-        (widthFor(id) ??
-          (id === TITLE_COLUMN_ID
-            ? DEFAULT_TITLE_WIDTH
-            : DEFAULT_COLUMN_WIDTH)),
-      0
-    );
+        (prop?.type === PropertyType.Relation
+          ? DEFAULT_RELATION_COLUMN_WIDTH
+          : DEFAULT_COLUMN_WIDTH)
+      );
+    }, 0);
 
   return (
     <ScrollContainer>
@@ -589,6 +580,11 @@ function DatabaseTableHeader({
       $flush={!!onUpdateProperty}
       $dragging={isDragging}
       $dropSide={dropSide}
+      $defaultWidth={
+        property.type === PropertyType.Relation
+          ? DEFAULT_RELATION_COLUMN_WIDTH
+          : undefined
+      }
       style={columnWidthStyle(width)}
     >
       {isSortable && (
@@ -646,6 +642,9 @@ const MIN_COLUMN_WIDTH = 27;
 
 /** The width of a property column with no stored width. */
 const DEFAULT_COLUMN_WIDTH = 140;
+
+/** The width of a relation column with no stored width — wider to fit chips. */
+const DEFAULT_RELATION_COLUMN_WIDTH = 260;
 
 /** The width of the title column with no stored width. */
 const DEFAULT_TITLE_WIDTH = 220;
@@ -951,6 +950,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       $dragging={isDragging}
+      $depth={depth}
       onKeyDown={handleKeyDown}
     >
       {isSortable && (
@@ -1122,9 +1122,13 @@ const GripHeaderCell = styled.th`
   padding: 0;
 `;
 
-const Row = styled.tr<{ $dragging?: boolean }>`
+const Row = styled.tr<{ $dragging?: boolean; $depth?: number }>`
   background: ${(props) =>
-    props.$dragging ? props.theme.backgroundSecondary : "transparent"};
+    props.$dragging
+      ? props.theme.backgroundSecondary
+      : props.$depth
+        ? props.theme.sidebarBackground
+        : "transparent"};
   position: ${(props) => (props.$dragging ? "relative" : "static")};
   z-index: ${(props) => (props.$dragging ? 1 : "auto")};
 

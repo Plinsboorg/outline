@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import styled from "styled-components";
 import { v4 as uuidv4 } from "uuid";
 import { s } from "@shared/styles";
+import { fadeAndSlideDown } from "~/styles/animations";
 import type { Property, PropertyConfig, PropertyOption } from "@shared/types";
 import { PropertyType, RollupAggregation } from "@shared/types";
 import { errToString } from "@shared/utils/error";
@@ -344,7 +345,7 @@ function DatabaseSchemaEditor({ databaseId, onSubmit }: Props) {
               </Flex>
             )}
             {isNumber && (
-              <Flex align="center" gap={8}>
+              <>
                 <Switch
                   label={t("Number rows automatically")}
                   labelPosition="right"
@@ -358,36 +359,42 @@ function DatabaseSchemaEditor({ databaseId, onSubmit }: Props) {
                   inForm={false}
                 />
                 {property.config?.autoNumber && (
-                  <>
-                    <PrefixInput
-                      value={property.config?.autoNumberPrefix ?? ""}
-                      placeholder={t("Prefix")}
-                      maxLength={PropertyValidation.maxAutoNumberPrefixLength}
-                      onChange={(ev: React.ChangeEvent<HTMLInputElement>) =>
-                        updateConfig(index, {
-                          autoNumberPrefix: ev.target.value || undefined,
-                        })
-                      }
-                      margin={0}
-                    />
-                    <PrefixInput
-                      pattern="[0-9]*"
-                      value={property.config?.autoNumberStart ?? ""}
-                      placeholder={t("Start at")}
-                      onChange={(ev: React.ChangeEvent<HTMLInputElement>) => {
-                        const parsed = Number.parseInt(ev.target.value, 10);
-                        updateConfig(index, {
-                          autoNumberStart:
-                            Number.isInteger(parsed) && parsed >= 0
-                              ? parsed
-                              : undefined,
-                        });
-                      }}
-                      margin={0}
-                    />
-                  </>
+                  <AutoNumberPanel>
+                    <Flex align="center" gap={8} wrap>
+                      <FieldLabel>{t("Prefix")}</FieldLabel>
+                      <PrefixInput
+                        value={property.config?.autoNumberPrefix ?? ""}
+                        placeholder={t("e.g. INV-")}
+                        maxLength={
+                          PropertyValidation.maxAutoNumberPrefixLength
+                        }
+                        onChange={(ev: React.ChangeEvent<HTMLInputElement>) =>
+                          updateConfig(index, {
+                            autoNumberPrefix: ev.target.value || undefined,
+                          })
+                        }
+                        margin={0}
+                      />
+                      <FieldLabel>{t("Start at")}</FieldLabel>
+                      <PrefixInput
+                        pattern="[0-9]*"
+                        value={property.config?.autoNumberStart ?? ""}
+                        placeholder="1"
+                        onChange={(ev: React.ChangeEvent<HTMLInputElement>) => {
+                          const parsed = Number.parseInt(ev.target.value, 10);
+                          updateConfig(index, {
+                            autoNumberStart:
+                              Number.isInteger(parsed) && parsed >= 0
+                                ? parsed
+                                : undefined,
+                          });
+                        }}
+                        margin={0}
+                      />
+                    </Flex>
+                  </AutoNumberPanel>
                 )}
-              </Flex>
+              </>
             )}
             {supportsOptions && (
               <PropertyOptionsEditor
@@ -444,8 +451,22 @@ const NameInput = styled(Input)`
 `;
 
 const PrefixInput = styled(Input)`
-  width: 120px;
+  width: 80px;
+`;
+
+const FieldLabel = styled.span`
+  font-size: 13px;
+  color: ${s("textSecondary")};
+  white-space: nowrap;
   flex-shrink: 0;
+`;
+
+const AutoNumberPanel = styled.div`
+  background: ${s("backgroundSecondary")};
+  border: 1px solid ${s("inputBorder")};
+  border-radius: 8px;
+  padding: 10px 12px;
+  animation: ${fadeAndSlideDown} 100ms ease;
 `;
 
 export default observer(DatabaseSchemaEditor);

@@ -1,12 +1,14 @@
 import { arrayMove } from "@dnd-kit/sortable";
 import { observer } from "mobx-react";
-import { DatabaseIcon, SettingsIcon, SortManualIcon } from "outline-icons";
+import { CollapsedIcon, DatabaseIcon, SettingsIcon, SortManualIcon } from "outline-icons";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import styled from "styled-components";
 import { v4 as uuidv4 } from "uuid";
 import { s } from "@shared/styles";
+import { fadeAndSlideDown } from "~/styles/animations";
 import type {
   DataViewSummaries,
   DataViewSort,
@@ -75,6 +77,11 @@ type Props = {
    * protect what a document shows from being edited through it.
    */
   readOnly?: boolean;
+  /**
+   * When present, a "Documents" tab is appended to the view tab bar. Clicking
+   * it opens a slide-down panel listing the document's children and backlinks.
+   */
+  referencesDocument?: Document;
 };
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -94,6 +101,7 @@ function DatabaseView({
   pageSize = DEFAULT_PAGE_SIZE,
   canEditView,
   readOnly = false,
+  referencesDocument,
 }: Props) {
   const { t } = useTranslation();
   const { databases, documents, dialogs } = useStores();
@@ -119,7 +127,33 @@ function DatabaseView({
     ReadonlySet<string>
   >(new Set());
   const [peekDocumentId, setPeekDocumentId] = React.useState<string>();
+  const [docsOpen, setDocsOpen] = React.useState(false);
+  const [docsSearch, setDocsSearch] = React.useState("");
   const isCreatingRef = React.useRef(false);
+  const docsTabRef = React.useRef<HTMLButtonElement>(null);
+  const docsDrawerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (referencesDocument) {
+      void documents.fetchRelationships(referencesDocument.id);
+    }
+  }, [referencesDocument, documents]);
+
+  React.useEffect(() => {
+    if (!docsOpen) {
+      return;
+    }
+    const handlePointerDown = (e: PointerEvent) => {
+      if (
+        !docsTabRef.current?.contains(e.target as Node) &&
+        !docsDrawerRef.current?.contains(e.target as Node)
+      ) {
+        setDocsOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [docsOpen]);
 
   const handlePeekOpen = React.useCallback(
     (documentId: string) => setPeekDocumentId(documentId),
@@ -385,31 +419,44 @@ function DatabaseView({
   }, []);
 
   const handleNewSubItem = React.useCallback(
-    async (parent: Document) => {
-      if (isCreatingRef.current) {
-        return;
-      }
-      isCreatingRef.current = true;
-      try {
-        const document = await documents.create(
-          {
-            title: "",
-            collectionId: database.collectionId ?? undefined,
-            databaseId: database.id,
-            parentDocumentId: parent.id,
-          },
-          { publish: true }
-        );
-        setRows((current) => [...(current ?? []), document]);
-        setExpandedRowIds((current) => new Set(current).add(parent.id));
-        setNewRowId(document.id);
-      } catch (error) {
-        toast.error(errToString(error));
-      } finally {
-        isCreatingRef.current = false;
-      }
+    (parent: Document) => {
+      dialogs.openModal({
+        title: t("New sub-item"),
+        content: (
+          <SubItemDialog
+            parentName={parent.titleWithDefault}
+            onConfirm={async (title) => {
+              dialogs.closeAllModals();
+              if (isCreatingRef.current) {
+                return;
+              }
+              isCreatingRef.current = true;
+              try {
+                const document = await documents.create(
+                  {
+                    title,
+                    collectionId: database.collectionId ?? undefined,
+                    databaseId: database.id,
+                    parentDocumentId: parent.id,
+                  },
+                  { publish: true }
+                );
+                setRows((current) => [...(current ?? []), document]);
+                setExpandedRowIds((current) =>
+                  new Set(current).add(parent.id)
+                );
+              } catch (error) {
+                toast.error(errToString(error));
+              } finally {
+                isCreatingRef.current = false;
+              }
+            }}
+            onCancel={dialogs.closeAllModals}
+          />
+        ),
+      });
     },
-    [documents, database]
+    [t, dialogs, documents, database]
   );
 
   // plain-row variant for views that create without a preset group value, so
@@ -695,6 +742,23 @@ function DatabaseView({
         onCreate={handleCreateView}
         onRename={handleRenameView}
         onDelete={handleDeleteView}
+        extraTabs={
+          referencesDocument &&
+          (referencesDocument.children.length > 0 ||
+            referencesDocument.backlinks.length > 0) ? (
+            <DocsTabButton
+              ref={docsTabRef}
+              type="button"
+              $active={docsOpen}
+              onClick={() => setDocsOpen((v) => !v)}
+            >
+              {t("Documents")}
+              <DocsTabArrow $open={docsOpen}>
+                <CollapsedIcon size={16} />
+              </DocsTabArrow>
+            </DocsTabButton>
+          ) : undefined
+        }
         trailing={
           <>
             {canConfigureView && (
@@ -747,6 +811,42 @@ function DatabaseView({
           </>
         }
       />
+
+      {docsOpen && referencesDocument && (
+        <DocsDrawer ref={docsDrawerRef}>
+          <DocsSearch
+            type="search"
+            placeholder={t("Search documents…")}
+            value={docsSearch}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setDocsSearch(e.target.value)
+            }
+          />
+          <DocsScrollArea>
+            {referencesDocument.children
+              .filter((node) =>
+                node.title.toLowerCase().includes(docsSearch.toLowerCase())
+              )
+              .map((node) => (
+                <DocsItem key={node.id} to={node.url}>
+                  {node.title || t("Untitled")}
+                </DocsItem>
+              ))}
+            {referencesDocument.backlinks
+              .filter((doc) =>
+                doc.titleWithDefault
+                  .toLowerCase()
+                  .includes(docsSearch.toLowerCase())
+              )
+              .map((doc) => (
+                <DocsItem key={doc.id} to={doc.path}>
+                  {doc.titleWithDefault}
+                  <DocsBacklinkBadge>{t("backlink")}</DocsBacklinkBadge>
+                </DocsItem>
+              ))}
+          </DocsScrollArea>
+        </DocsDrawer>
+      )}
 
       {toolbarVisible && (
         <Toolbar align="center" gap={8}>
@@ -949,7 +1049,6 @@ function DatabaseView({
           rowDepths={rowTree.depthById}
           parentRowIds={rowTree.parentIds}
           expandedRowIds={expandedRowIds}
-          listEndsAfter={rowTree.listEndsAfter}
           onToggleRowExpand={handleToggleRowExpand}
           onAddSubItem={canCreateRow ? handleNewSubItem : undefined}
           propertiesToggle={
@@ -1057,6 +1156,175 @@ const BoardGuidanceBody = styled.p`
   font-size: 14px;
   max-width: 320px;
   color: ${s("textTertiary")};
+`;
+
+/** Documents tab — first in bar, distinct: no underline, rotating chevron. */
+const DocsTabButton = styled.button<{ $active: boolean }>`
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: none;
+  background: none;
+  font-size: 14px;
+  font-weight: 500;
+  color: ${(props) => (props.$active ? s("text") : s("textSecondary"))};
+  border-bottom: 2px solid transparent;
+  padding: 6px 8px;
+  margin-bottom: -1px;
+  cursor: var(--pointer);
+
+  &:hover {
+    color: ${s("text")};
+  }
+`;
+
+const DocsTabArrow = styled.span<{ $open: boolean }>`
+  display: inline-flex;
+  align-items: center;
+  color: ${s("textTertiary")};
+  transition: transform 150ms ease;
+  transform: rotate(${(props) => (props.$open ? "0deg" : "-90deg")});
+`;
+
+/** Slide-down panel that lists child documents and backlinks. */
+const DocsDrawer = styled.div`
+  border: 1px solid ${s("divider")};
+  border-radius: 8px;
+  margin-bottom: 12px;
+  animation: ${fadeAndSlideDown} 120ms ease;
+  overflow: hidden;
+`;
+
+const DocsSearch = styled.input`
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: none;
+  border-bottom: 1px solid ${s("divider")};
+  background: ${s("background")};
+  color: ${s("text")};
+  font-size: 14px;
+  outline: none;
+
+  &::placeholder {
+    color: ${s("placeholder")};
+  }
+`;
+
+const DocsScrollArea = styled.div`
+  max-height: 240px;
+  overflow-y: auto;
+`;
+
+const DocsItem = styled(Link)`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  font-size: 14px;
+  color: ${s("text")};
+
+  &:hover {
+    background: ${s("listItemHoverBackground")};
+  }
+
+  &:not(:last-child) {
+    border-bottom: 1px solid ${s("divider")};
+  }
+`;
+
+const DocsBacklinkBadge = styled.span`
+  margin-left: auto;
+  font-size: 11px;
+  color: ${s("textTertiary")};
+`;
+
+/**
+ * A small form shown in a modal to name a sub-item before it is created.
+ * Collecting the title up-front avoids the confusing scroll-to-blank-row
+ * behaviour that inline creation causes.
+ */
+function SubItemDialog({
+  parentName,
+  onConfirm,
+  onCancel,
+}: {
+  parentName: string;
+  onConfirm: (title: string) => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const [title, setTitle] = React.useState("");
+
+  const handleSubmit = (ev: React.FormEvent) => {
+    ev.preventDefault();
+    onConfirm(title.trim());
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <SubItemDialogBody>
+        <SubItemParentLabel>
+          {t("Under")}:{" "}
+          <strong>{parentName}</strong>
+        </SubItemParentLabel>
+        <SubItemInput
+          type="text"
+          autoFocus
+          placeholder={t("Name…")}
+          value={title}
+          onChange={(ev) => setTitle(ev.target.value)}
+        />
+        <SubItemDialogActions>
+          <Button type="button" onClick={onCancel} neutral>
+            {t("Cancel")}
+          </Button>
+          <Button type="submit" disabled={!title.trim()}>
+            {t("Create")}
+          </Button>
+        </SubItemDialogActions>
+      </SubItemDialogBody>
+    </form>
+  );
+}
+
+const SubItemDialogBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 0 8px;
+`;
+
+const SubItemParentLabel = styled.p`
+  margin: 0;
+  font-size: 14px;
+  color: ${s("textSecondary")};
+`;
+
+const SubItemInput = styled.input`
+  width: 100%;
+  font-size: 15px;
+  padding: 8px 10px;
+  border: 1px solid ${s("inputBorder")};
+  border-radius: 6px;
+  background: ${s("background")};
+  color: ${s("text")};
+  outline: none;
+
+  &:focus {
+    border-color: ${s("inputBorderFocused")};
+  }
+
+  &::placeholder {
+    color: ${s("placeholder")};
+  }
+`;
+
+const SubItemDialogActions = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 `;
 
 export default observer(DatabaseView);

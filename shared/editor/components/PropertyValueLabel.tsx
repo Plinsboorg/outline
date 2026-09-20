@@ -43,7 +43,9 @@ export const PropertyValueLabel = observer(function PropertyValueLabel_({
 
     case PropertyType.Select: {
       const option = property.options?.find((item) => item.id === value);
-      return option ? <Chip $color={option.color}>{option.name}</Chip> : null;
+      return option ? (
+        <PropertyChip $color={option.color}>{option.name}</PropertyChip>
+      ) : null;
     }
 
     case PropertyType.MultiSelect: {
@@ -51,16 +53,16 @@ export const PropertyValueLabel = observer(function PropertyValueLabel_({
         return null;
       }
       return (
-        <>
+        <ChipList>
           {value.map((id) => {
             const option = property.options?.find((item) => item.id === id);
             return option ? (
-              <Chip key={id} $color={option.color}>
+              <PropertyChip key={id} $color={option.color}>
                 {option.name}
-              </Chip>
+              </PropertyChip>
             ) : null;
           })}
-        </>
+        </ChipList>
       );
     }
 
@@ -156,8 +158,11 @@ const DocumentChip = styled(Link)`
   }
 `;
 
-const Chip = styled(PropertyChip)`
-  margin-right: 4px;
+const ChipList = styled.span`
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
 `;
 
 const Thumbnail = styled.img`

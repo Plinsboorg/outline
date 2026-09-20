@@ -28,6 +28,8 @@ type Props = {
   onDelete: (viewId: string) => void;
   /** Content rendered at the right edge of the bar, e.g. toolbar toggles. */
   trailing?: React.ReactNode;
+  /** Extra tab buttons rendered after the saved-view tabs, same styling. */
+  extraTabs?: React.ReactNode;
 };
 
 /**
@@ -44,6 +46,7 @@ function DatabaseViewTabs({
   onRename,
   onDelete,
   trailing,
+  extraTabs,
 }: Props) {
   const { t } = useTranslation();
   const [isAdding, setIsAdding] = React.useState(false);
@@ -69,6 +72,8 @@ function DatabaseViewTabs({
 
   return (
     <Bar align="center" gap={4}>
+      {extraTabs}
+      {extraTabs && views.length > 0 && <TabSeparator />}
       {views.map((view) =>
         renamingId === view.id ? (
           <RenameInput
@@ -195,6 +200,14 @@ const RenameInput = styled.input`
   background: ${s("background")};
   color: ${s("text")};
   max-width: 160px;
+`;
+
+const TabSeparator = styled.div`
+  width: 1px;
+  height: 16px;
+  background: ${s("divider")};
+  margin: 0 4px;
+  flex-shrink: 0;
 `;
 
 const AddContainer = styled.div`
