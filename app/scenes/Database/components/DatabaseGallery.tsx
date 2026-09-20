@@ -11,6 +11,7 @@ import { PropertyType } from "@shared/types";
 import { sanitizeImageSrc } from "@shared/utils/urls";
 import type Document from "~/models/Document";
 import NudeButton from "~/components/NudeButton";
+import DatabaseEmptyState from "./DatabaseEmptyState";
 import DatabaseRowMenu from "./DatabaseRowMenu";
 import RowTitleInput from "./RowTitleInput";
 
@@ -29,6 +30,8 @@ type Props = {
   onNewRowDone: () => void;
   /** Callback deleting a row; absent when the user may not delete rows. */
   onDeleteRow?: (document: Document) => void;
+  /** Callback opening the row peek panel instead of navigating to the row page. */
+  onPeekOpen?: (documentId: string) => void;
 };
 
 /**
@@ -43,19 +46,20 @@ function DatabaseGallery({
   newRowId,
   onNewRowDone,
   onDeleteRow,
+  onPeekOpen,
 }: Props) {
   const { t } = useTranslation();
 
   if (rows.length === 0 && !onNewRow) {
-    return (
-      <Empty>
-        {hasFilter ? t("No documents match the filter") : t("No documents yet")}
-      </Empty>
-    );
+    return <DatabaseEmptyState hasFilter={hasFilter} />;
   }
 
   return (
-    <Grid>
+    <>
+      {rows.length === 0 && (
+        <DatabaseEmptyState hasFilter={hasFilter} />
+      )}
+      <Grid>
       {rows.map((document) => (
         <GalleryCard
           key={document.id}
@@ -64,6 +68,7 @@ function DatabaseGallery({
           isEditingTitle={document.id === newRowId}
           onTitleDone={onNewRowDone}
           onDelete={onDeleteRow}
+          onPeekOpen={onPeekOpen}
         />
       ))}
       {onNewRow && (
@@ -73,6 +78,7 @@ function DatabaseGallery({
         </NewCardButton>
       )}
     </Grid>
+    </>
   );
 }
 
@@ -82,12 +88,14 @@ const GalleryCard = observer(function GalleryCard_({
   isEditingTitle,
   onTitleDone,
   onDelete,
+  onPeekOpen,
 }: {
   document: Document;
   properties: Property[];
   isEditingTitle: boolean;
   onTitleDone: () => void;
   onDelete?: (document: Document) => void;
+  onPeekOpen?: (documentId: string) => void;
 }) {
   // the first visible image property doubles as the card's cover image
   const coverProperty = properties.find(
@@ -111,6 +119,13 @@ const GalleryCard = observer(function GalleryCard_({
       )}
       {isEditingTitle ? (
         <RowTitleInput document={document} onDone={onTitleDone} />
+      ) : onPeekOpen ? (
+        <CardTitleButton
+          type="button"
+          onClick={() => onPeekOpen(document.id)}
+        >
+          {document.titleWithDefault}
+        </CardTitleButton>
       ) : (
         <CardTitle to={document.path}>{document.titleWithDefault}</CardTitle>
       )}
@@ -192,6 +207,24 @@ const CardTitle = styled(Link)`
   }
 `;
 
+const CardTitleButton = styled.button`
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: ${s("text")};
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+`;
+
 const NewCardButton = styled(NudeButton)`
   display: flex;
   align-items: center;
@@ -228,14 +261,6 @@ const CardValue = styled.span`
   color: ${s("textSecondary")};
   overflow: hidden;
   text-overflow: ellipsis;
-`;
-
-const Empty = styled.div`
-  border: 1px solid ${s("divider")};
-  border-radius: 8px;
-  padding: 24px;
-  text-align: center;
-  color: ${s("textSecondary")};
 `;
 
 export default observer(DatabaseGallery);

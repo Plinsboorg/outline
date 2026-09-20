@@ -1,6 +1,6 @@
 import { arrayMove } from "@dnd-kit/sortable";
 import { observer } from "mobx-react";
-import { SettingsIcon, SortManualIcon } from "outline-icons";
+import { DatabaseIcon, SettingsIcon, SortManualIcon } from "outline-icons";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -42,7 +42,8 @@ import useStores from "~/hooks/useStores";
 import DatabaseBoard from "./DatabaseBoard";
 import DatabaseGallery from "./DatabaseGallery";
 import DatabaseList from "./DatabaseList";
-import DatabaseTable from "./DatabaseTable";
+import DatabaseTable, { VIRTUALIZE_THRESHOLD } from "./DatabaseTable";
+import RowPeekPanel from "./RowPeekPanel";
 import DatabaseTableFilter from "./DatabaseTableFilter";
 import DatabaseViewProperties from "./DatabaseViewProperties";
 import DatabaseViewTabs from "./DatabaseViewTabs";
@@ -117,7 +118,17 @@ function DatabaseView({
   const [expandedRowIds, setExpandedRowIds] = React.useState<
     ReadonlySet<string>
   >(new Set());
+  const [peekDocumentId, setPeekDocumentId] = React.useState<string>();
   const isCreatingRef = React.useRef(false);
+
+  const handlePeekOpen = React.useCallback(
+    (documentId: string) => setPeekDocumentId(documentId),
+    []
+  );
+  const handlePeekClose = React.useCallback(
+    () => setPeekDocumentId(undefined),
+    []
+  );
 
   // rows are held in local state here, so the deleted one has to be dropped
   // by hand — the store cannot reach into it
@@ -133,22 +144,38 @@ function DatabaseView({
     () => database.dataSchema ?? [],
     [database.dataSchema]
   );
-  const groupableProperties = schema.filter(isGroupableProperty);
+  const groupableProperties = React.useMemo(
+    () => schema.filter(isGroupableProperty),
+    [schema]
+  );
 
   const activeView = source.view;
   const updateView = source.updateView;
-  const orderedProperties = orderedPropertiesForView(schema, activeView);
-  const visibleProperties = visiblePropertiesForView(schema, activeView);
+
+  // useComputed wraps a MobX computed so the result is stable across React
+  // re-renders that don't touch the underlying observables (schema, view
+  // columns). This prevents every view component from re-rendering when
+  // unrelated state changes (e.g. newRowId, peekDocumentId).
+  const orderedProperties = useComputed(
+    () => orderedPropertiesForView(schema, activeView),
+    [schema, activeView]
+  );
+  const visibleProperties = useComputed(
+    () => visiblePropertiesForView(schema, activeView),
+    [schema, activeView]
+  );
 
   // where the title column sits among the visible columns of the table view —
   // it can be dragged behind property columns like any other
-  const visibleColumnIds = new Set<string>([
-    TITLE_COLUMN_ID,
-    ...visibleProperties.map((property) => property.id),
-  ]);
-  const titleIndex = normalizedColumnsForView(schema, activeView)
-    .filter((column) => visibleColumnIds.has(column.propertyId))
-    .findIndex((column) => column.propertyId === TITLE_COLUMN_ID);
+  const titleIndex = useComputed(() => {
+    const visibleColumnIds = new Set<string>([
+      TITLE_COLUMN_ID,
+      ...visibleProperties.map((property) => property.id),
+    ]);
+    return normalizedColumnsForView(schema, activeView)
+      .filter((column) => visibleColumnIds.has(column.propertyId))
+      .findIndex((column) => column.propertyId === TITLE_COLUMN_ID);
+  }, [schema, activeView, visibleProperties]);
 
   const sort: DataViewSort | undefined = activeView?.sorts?.[0];
   const filter = activeView?.filter?.conditions?.[0] as
@@ -190,6 +217,10 @@ function DatabaseView({
     activeView?.type === DataViewType.Board && groupableProperties.length === 0
       ? DataViewType.Table
       : (activeView?.type ?? DataViewType.Table);
+
+  /** True when the user has selected Board view but the schema has no Select property to group by. */
+  const boardNeedsGroupProperty =
+    activeView?.type === DataViewType.Board && groupableProperties.length === 0;
 
   // the rendered view's own filter, narrowed by anything the surface applies
   // beneath it — the saved view's filter, where this is an override of one.
@@ -397,6 +428,24 @@ function DatabaseView({
     },
     [databases, database]
   );
+
+  /** Adds a new Select property and sets it as the board's group-by — called from the Board guidance panel. */
+  const handleAddSelectForBoard = React.useCallback(async () => {
+    const existingNames = (database.dataSchema ?? []).map((p) => p.name);
+    const base = t("Status");
+    let name = base;
+    let counter = 2;
+    while (existingNames.includes(name)) {
+      name = `${base} ${counter++}`;
+    }
+    const property: Property = {
+      id: uuidv4(),
+      name,
+      type: PropertyType.Select,
+      options: [],
+    };
+    await handleAddProperty(property);
+  }, [database.dataSchema, handleAddProperty, t]);
 
   const handleUpdateProperty = React.useCallback(
     async (propertyId: string, updates: Partial<Property>) => {
@@ -801,16 +850,35 @@ function DatabaseView({
         </Toolbar>
       )}
 
-      {viewType === DataViewType.Board && boardGroupByProperty ? (
+      {boardNeedsGroupProperty ? (
+        <BoardGuidance direction="column" align="center" justify="center" gap={12}>
+          <DatabaseIcon size={40} color="currentColor" />
+          <BoardGuidanceTitle>
+            {t("Board view needs a Select property")}
+          </BoardGuidanceTitle>
+          <BoardGuidanceBody>
+            {t(
+              "Board view groups rows by a Select property. Add one to get started."
+            )}
+          </BoardGuidanceBody>
+          {canEditDatabase && (
+            <Button type="button" onClick={handleAddSelectForBoard} neutral>
+              {t("Add a Select property")}
+            </Button>
+          )}
+        </BoardGuidance>
+      ) : viewType === DataViewType.Board && boardGroupByProperty ? (
         <DatabaseBoard
           readOnly={readOnly}
           rows={orderedRows}
           properties={visibleProperties}
           groupByProperty={boardGroupByProperty}
+          hasFilter={hasFilter}
           onNewRow={canCreateRow ? handleNewRow : undefined}
           newRowId={newRowId}
           onNewRowDone={handleNewRowDone}
           onDeleteRow={readOnly ? undefined : handleDeleteRow}
+          onPeekOpen={handlePeekOpen}
         />
       ) : viewType === DataViewType.List ? (
         <DatabaseList
@@ -827,6 +895,7 @@ function DatabaseView({
           parentRowIds={rowTree.parentIds}
           expandedRowIds={expandedRowIds}
           onToggleRowExpand={handleToggleRowExpand}
+          onPeekOpen={handlePeekOpen}
         />
       ) : viewType === DataViewType.Gallery ? (
         <DatabaseGallery
@@ -837,6 +906,7 @@ function DatabaseView({
           newRowId={newRowId}
           onNewRowDone={handleNewRowDone}
           onDeleteRow={readOnly ? undefined : handleDeleteRow}
+          onPeekOpen={handlePeekOpen}
         />
       ) : (
         <DatabaseTable
@@ -869,7 +939,13 @@ function DatabaseView({
           onMoveProperty={canConfigureView ? handleMoveProperty : undefined}
           // a sorted view derives its order from the sort, so rows can only
           // be arranged by hand while no sort is applied
-          onMoveRow={canEditDatabase && !sort ? handleMoveRow : undefined}
+          onMoveRow={
+            canEditDatabase &&
+            !sort &&
+            (rows?.length ?? 0) <= VIRTUALIZE_THRESHOLD
+              ? handleMoveRow
+              : undefined
+          }
           rowDepths={rowTree.depthById}
           parentRowIds={rowTree.parentIds}
           expandedRowIds={expandedRowIds}
@@ -889,6 +965,7 @@ function DatabaseView({
           summaries={summaries}
           canEditSummaries={canConfigureView}
           onChangeSummary={handleChangeSummary}
+          onPeekOpen={handlePeekOpen}
         />
       )}
 
@@ -904,6 +981,14 @@ function DatabaseView({
           </Button>
         </LoadMore>
       )}
+
+      {peekDocumentId &&
+        documents.get(peekDocumentId) && (
+          <RowPeekPanel
+            document={documents.get(peekDocumentId)!}
+            onClose={handlePeekClose}
+          />
+        )}
     </Fade>
   );
 }
@@ -952,6 +1037,26 @@ const Toolbar = styled(Flex)`
 
 const LoadMore = styled(Flex)`
   margin: 12px 0;
+`;
+
+const BoardGuidance = styled(Flex)`
+  padding: 48px 24px;
+  color: ${s("textTertiary")};
+  text-align: center;
+`;
+
+const BoardGuidanceTitle = styled.h3`
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: ${s("text")};
+`;
+
+const BoardGuidanceBody = styled.p`
+  margin: 0;
+  font-size: 14px;
+  max-width: 320px;
+  color: ${s("textTertiary")};
 `;
 
 export default observer(DatabaseView);

@@ -28,6 +28,7 @@ import { sanitizeImageSrc } from "@shared/utils/urls";
 import type Document from "~/models/Document";
 import NudeButton from "~/components/NudeButton";
 import usePolicy from "~/hooks/usePolicy";
+import DatabaseEmptyState from "./DatabaseEmptyState";
 import DatabaseRowMenu from "./DatabaseRowMenu";
 import RowTitleInput from "./RowTitleInput";
 
@@ -50,8 +51,12 @@ type Props = {
   newRowId?: string;
   /** Callback when the inline title editing of a new row has finished. */
   onNewRowDone: () => void;
+  /** Whether an active filter reduces the row set (affects empty state text). */
+  hasFilter?: boolean;
   /** Callback deleting a row; absent when the user may not delete rows. */
   onDeleteRow?: (document: Document) => void;
+  /** Callback opening the row peek panel instead of navigating to the row page. */
+  onPeekOpen?: (documentId: string) => void;
 };
 
 const EMPTY_COLUMN_ID = "__none__";
@@ -67,10 +72,12 @@ function DatabaseBoard({
   rows,
   properties,
   groupByProperty: property,
+  hasFilter = false,
   onNewRow,
   newRowId,
   onNewRowDone,
   onDeleteRow,
+  onPeekOpen,
 }: Props) {
   const { t } = useTranslation();
 
@@ -118,6 +125,10 @@ function DatabaseBoard({
     [rows, property]
   );
 
+  if (rows.length === 0) {
+    return <DatabaseEmptyState hasFilter={hasFilter} />;
+  }
+
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       <Columns>
@@ -134,6 +145,7 @@ function DatabaseBoard({
             newRowId={newRowId}
             onNewRowDone={onNewRowDone}
             onDeleteRow={onDeleteRow}
+            onPeekOpen={onPeekOpen}
           />
         ))}
       </Columns>
@@ -152,6 +164,7 @@ const BoardColumn = observer(function BoardColumn_({
   newRowId,
   onNewRowDone,
   onDeleteRow,
+  onPeekOpen,
 }: {
   readOnly: boolean;
   option: PropertyOption | null;
@@ -163,6 +176,7 @@ const BoardColumn = observer(function BoardColumn_({
   newRowId?: string;
   onNewRowDone: () => void;
   onDeleteRow?: (document: Document) => void;
+  onPeekOpen?: (documentId: string) => void;
 }) {
   const { t } = useTranslation();
   const { setNodeRef, isOver } = useDroppable({
@@ -201,6 +215,7 @@ const BoardColumn = observer(function BoardColumn_({
           isEditingTitle={document.id === newRowId}
           onTitleDone={onNewRowDone}
           onDelete={onDeleteRow}
+          onPeekOpen={onPeekOpen}
         />
       ))}
       {onNewRow && (
@@ -226,6 +241,7 @@ const BoardCard = observer(function BoardCard_({
   isEditingTitle,
   onTitleDone,
   onDelete,
+  onPeekOpen,
 }: {
   readOnly: boolean;
   document: Document;
@@ -234,6 +250,7 @@ const BoardCard = observer(function BoardCard_({
   isEditingTitle: boolean;
   onTitleDone: () => void;
   onDelete?: (document: Document) => void;
+  onPeekOpen?: (documentId: string) => void;
 }) {
   const can = usePolicy(document);
   // a card of a protected view is read through, never written through
@@ -280,6 +297,13 @@ const BoardCard = observer(function BoardCard_({
       )}
       {isEditingTitle ? (
         <RowTitleInput document={document} onDone={onTitleDone} />
+      ) : onPeekOpen ? (
+        <CardTitleButton
+          type="button"
+          onClick={() => onPeekOpen(document.id)}
+        >
+          {document.titleWithDefault}
+        </CardTitleButton>
       ) : (
         <CardTitle to={document.path}>{document.titleWithDefault}</CardTitle>
       )}
@@ -394,6 +418,24 @@ const CardTitle = styled(Link)`
   font-size: 14px;
   font-weight: 500;
   margin-bottom: 4px;
+
+  &:hover {
+    text-decoration: underline;
+  }
+`;
+
+const CardTitleButton = styled.button`
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: ${s("text")};
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  cursor: pointer;
 
   &:hover {
     text-decoration: underline;
