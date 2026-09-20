@@ -107,13 +107,32 @@ function useTemplateMenuItem(): MenuItem | undefined {
 
 /**
  * Hook that returns a database menu item with children for inserting an
- * inline database block, or undefined when the feature is disabled or no
- * databases exist.
+ * inline database block. Always includes a "New database" option when the
+ * feature is enabled, plus a child per existing database.
+ *
+ * Returns undefined only when the feature is disabled for the team.
  */
 function useDatabaseMenuItem(): MenuItem | undefined {
   const { t } = useTranslation();
   const team = useCurrentTeam({ rejectOnEmpty: false });
-  const { databases } = useStores();
+  const { databases, documents } = useStores();
+  const editor = useEditor();
+  const { commands } = editor;
+  const documentId = editor.props.id;
+  const document = documentId ? documents.get(documentId) : undefined;
+  const collectionId = document?.collectionId;
+
+  const handleCreateDatabase = useCallback(async () => {
+    try {
+      const database = await databases.create({
+        collectionId: collectionId ?? undefined,
+        name: t("Untitled database"),
+      });
+      commands.createDatabase?.({ databaseId: database.id });
+    } catch {
+      // creation errors surface via the store's error handling
+    }
+  }, [databases, collectionId, commands, t]);
 
   return useMemo(() => {
     if (!team?.getPreference(TeamPreference.DocumentDatabases)) {
@@ -121,24 +140,30 @@ function useDatabaseMenuItem(): MenuItem | undefined {
     }
 
     const available = databases.orderedData;
-    if (available.length === 0) {
-      return undefined;
-    }
 
     return {
       name: "noop",
       title: t("Database"),
       icon: <DatabaseIcon />,
       keywords: "database table rows",
-      children: available.map((database) => ({
-        name: "database",
-        title: database.name,
-        icon: <DatabaseIcon />,
-        keywords: database.name,
-        attrs: { databaseId: database.id },
-      })),
+      children: [
+        {
+          name: "noop",
+          title: t("New database"),
+          icon: <DatabaseIcon />,
+          keywords: "new create database",
+          onClick: handleCreateDatabase,
+        },
+        ...available.map((database) => ({
+          name: "database",
+          title: database.name,
+          icon: <DatabaseIcon />,
+          keywords: database.name,
+          attrs: { databaseId: database.id },
+        })),
+      ],
     } satisfies MenuItem;
-  }, [team, databases.orderedData, t]);
+  }, [team, databases.orderedData, handleCreateDatabase, t]);
 }
 
 type Props = Omit<SuggestionsMenuProps, "renderMenuItem" | "items"> &
