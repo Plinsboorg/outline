@@ -17,6 +17,11 @@ export default class Database extends ParanoidModel {
 
   store: DatabasesStore;
 
+  constructor(fields: Record<string, unknown>, store: DatabasesStore) {
+    super(fields, store);
+    this.initialize(fields);
+  }
+
   /** The anchor document's title, presented by the server for labelling. */
   @observable
   name: string;
