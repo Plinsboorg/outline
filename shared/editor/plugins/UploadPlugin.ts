@@ -1,8 +1,10 @@
 import type { Node } from "prosemirror-model";
+import { t } from "i18next";
 import { Fragment, Slice } from "prosemirror-model";
 import { NodeSelection, Plugin } from "prosemirror-state";
 import { v4 as uuidv4 } from "uuid";
 import {
+  getClipboardBlobImage,
   getDataTransferFiles,
   getDataTransferImage,
   dataUrlToFile,
@@ -30,7 +32,39 @@ export class UploadPlugin extends Plugin {
             // check if we actually pasted any files
             const files = getDataTransferFiles(event);
             if (files.length === 0) {
-              return false;
+              // Some mobile browsers paste images as HTML with a blob: source
+              // instead of a file, fetch it and upload as if it were a file.
+              const blobSrc = getClipboardBlobImage(event);
+              if (!blobSrc) {
+                return false;
+              }
+
+              event.preventDefault();
+              const { from } = view.state.selection;
+
+              void fetch(blobSrc)
+                .then((response) => response.blob())
+                .then((blob) => {
+                  if (view.isDestroyed || !FileHelper.isImage(blob.type)) {
+                    return;
+                  }
+                  const extension = blob.type.split("/")[1] ?? "png";
+                  return insertFiles(
+                    view,
+                    event,
+                    Math.min(from, view.state.doc.content.size),
+                    [
+                      new File([blob], `pasted-image.${extension}`, {
+                        type: blob.type,
+                      }),
+                    ],
+                    options
+                  );
+                })
+                .catch(() => {
+                  options.onNotice?.(t("Could not paste image"));
+                });
+              return true;
             }
 
             // When copying from Microsoft Office product the clipboard contains
@@ -75,6 +109,40 @@ export class UploadPlugin extends Plugin {
               view.dispatch(view.state.tr.deleteSelection());
             }
 
+            void insertFiles(
+              view,
+              event,
+              view.state.selection.from,
+              files,
+              options
+            );
+            return true;
+          },
+          // Mobile keyboards (eg Gboard) may paste images through beforeinput
+          // with files on dataTransfer, without firing a paste event.
+          beforeinput(view, event: InputEvent): boolean {
+            if (
+              !view.editable ||
+              !options.uploadFile ||
+              event.defaultPrevented ||
+              event.inputType !== "insertFromPaste"
+            ) {
+              return false;
+            }
+
+            const files = getDataTransferFiles(event);
+            if (
+              files.length === 0 ||
+              !files.every((f) => FileHelper.isImage(f.type))
+            ) {
+              return false;
+            }
+
+            event.preventDefault();
+            const { selection } = view.state;
+            if (!selection.empty && !(selection instanceof NodeSelection)) {
+              view.dispatch(view.state.tr.deleteSelection());
+            }
             void insertFiles(
               view,
               event,

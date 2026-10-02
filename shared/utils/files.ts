@@ -82,13 +82,39 @@ export function getDataTransferImage(
 }
 
 /**
+ * Get a blob image URL from a clipboard event. Some mobile keyboards and
+ * browsers paste images as HTML containing a `blob:` source rather than as a
+ * file, in which case the image must be fetched to be uploaded.
+ *
+ * @param event The clipboard event to get the image from.
+ * @returns The blob URL of the image, if any.
+ */
+export function getClipboardBlobImage(event: ClipboardEvent) {
+  const html = event.clipboardData?.getData("text/html");
+  if (!html) {
+    return;
+  }
+
+  try {
+    const src = new DOMParser()
+      .parseFromString(html, "text/html")
+      .querySelector("img")
+      ?.getAttribute("src");
+
+    return src?.toLowerCase().startsWith("blob:") ? src : undefined;
+  } catch (_err) {
+    return;
+  }
+}
+
+/**
  * Get an array of File objects from a drag or clipboard event
  *
  * @param event The event to get files from.
  * @returns An array of files.
  */
 export function getDataTransferFiles(
-  event: React.DragEvent<HTMLElement> | DragEvent | ClipboardEvent
+  event: React.DragEvent<HTMLElement> | DragEvent | ClipboardEvent | InputEvent
 ): File[] {
   const dt =
     event instanceof ClipboardEvent ? event.clipboardData : event.dataTransfer;

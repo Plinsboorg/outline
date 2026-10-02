@@ -26,6 +26,10 @@ import LinkEditor from "./LinkEditor";
 import ToolbarMenu from "./ToolbarMenu";
 import InlineMenu from "./InlineMenu";
 import StickyBlockToolbar from "./StickyBlockToolbar";
+import insertFiles from "@shared/editor/commands/insertFiles";
+import { useTranslation } from "react-i18next";
+import useStores from "~/hooks/useStores";
+import { ImageCropDialog } from "./ImageCropDialog";
 import { isModKey } from "@shared/utils/keyboard";
 
 type Props = {
@@ -69,7 +73,10 @@ enum Toolbar {
 
 export function SelectionToolbar(props: Props) {
   const { readOnly = false, isEditorFocused } = props;
-  const { view, extensions, commands, selectionToolbarMenus } = useEditor();
+  const editor = useEditor();
+  const { view, extensions, commands, selectionToolbarMenus } = editor;
+  const { t } = useTranslation();
+  const { dialogs } = useStores();
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const isMobile = useMobile();
   const isActive = props.isActive || isMobile;
@@ -255,6 +262,50 @@ export function SelectionToolbar(props: Props) {
         }
         return child;
       });
+    }
+
+    if (item.name === "cropImage") {
+      item.onClick = () => {
+        const { selection } = view.state;
+        if (!(selection instanceof NodeSelection)) {
+          return;
+        }
+        const { node } = selection;
+        const pos = selection.from;
+        const { uploadFile, ...uploadProps } = editor.props;
+        if (!uploadFile || node.type.name !== "image") {
+          return;
+        }
+
+        dialogs.openModal({
+          title: t("Crop image"),
+          content: (
+            <ImageCropDialog
+              src={node.attrs.src}
+              onSubmit={(result) => {
+                // Keep the on-screen scale of the original image.
+                const scale = node.attrs.width
+                  ? node.attrs.width / result.naturalWidth
+                  : 1;
+                void insertFiles(view, new Event("crop"), pos, [result.file], {
+                  uploadFile,
+                  onFileUploadStart: uploadProps.onFileUploadStart,
+                  onFileUploadStop: uploadProps.onFileUploadStop,
+                  onFileUploadProgress: uploadProps.onFileUploadProgress,
+                  onNotice: uploadProps.onNotice,
+                  replaceExisting: true,
+                  attrs: {
+                    width: Math.max(1, Math.round(result.width * scale)),
+                    height: Math.max(1, Math.round(result.height * scale)),
+                    alt: node.attrs.alt,
+                    layoutClass: node.attrs.layoutClass,
+                  },
+                });
+              }}
+            />
+          ),
+        });
+      };
     }
 
     if (item.name === "linkOnImage" || item.name === "addLink") {

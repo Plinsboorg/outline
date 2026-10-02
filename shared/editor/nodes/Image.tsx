@@ -309,6 +309,13 @@ export default class Image extends SimpleImage {
       commentedImagePlugin(),
       new Plugin({
         props: {
+          // An image is not text, so don't pop up the on-screen keyboard on
+          // mobile while one is selected.
+          attributes: (state) =>
+            state.selection instanceof NodeSelection &&
+            state.selection.node.type.name === "image"
+              ? { inputmode: "none" }
+              : {},
           handleDOMEvents: {
             dragstart: (_view, event) => {
               // ProseMirror lets the browser snapshot the dragged node's DOM as
@@ -598,6 +605,12 @@ export default class Image extends SimpleImage {
 
         return true;
       },
+      // Availability check only – the crop dialog itself is app UI and is
+      // opened by the selection toolbar when this item is clicked.
+      cropImage: (): Command => (state) =>
+        state.selection instanceof NodeSelection &&
+        state.selection.node.type.name === "image" &&
+        !!state.selection.node.attrs.src,
       alignRight: (): Command => (state, dispatch) => {
         if (!(state.selection instanceof NodeSelection)) {
           return false;
