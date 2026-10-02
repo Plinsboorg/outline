@@ -3,6 +3,8 @@ import { cloneDeep } from "es-toolkit/compat";
 import { observer } from "mobx-react";
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+
+import { toast } from "sonner";
 import Icon from "@shared/components/Icon";
 import type { MenuItem } from "@shared/editor/types";
 import { TeamPreference } from "@shared/types";
@@ -11,6 +13,7 @@ import { TextHelper } from "@shared/utils/TextHelper";
 import useCurrentTeam from "~/hooks/useCurrentTeam";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import useStores from "~/hooks/useStores";
+import history from "~/utils/history";
 import getMenuItems from "../menus/block";
 import { useEditor } from "./EditorContext";
 import type { Props as SuggestionsMenuProps } from "./SuggestionsMenu";
@@ -115,24 +118,28 @@ function useTemplateMenuItem(): MenuItem | undefined {
 function useDatabaseMenuItem(): MenuItem | undefined {
   const { t } = useTranslation();
   const team = useCurrentTeam({ rejectOnEmpty: false });
-  const { databases, documents } = useStores();
+  const { databases, documents, ui } = useStores();
   const editor = useEditor();
-  const { commands } = editor;
   const documentId = editor.props.id;
   const document = documentId ? documents.get(documentId) : undefined;
-  const collectionId = document?.collectionId;
+  // editors outside a document, such as a collection overview, have no
+  // document so the collection being viewed is used instead
+  const collectionId = document?.collectionId ?? ui.activeCollectionId;
 
   const handleCreateDatabase = useCallback(async () => {
     try {
       const database = await databases.create({
+        // the server requires a location: fall back to nesting under the
+        // current document when it does not belong to a collection
         collectionId: collectionId ?? undefined,
+        parentDocumentId: collectionId ? undefined : documentId,
         name: t("Untitled database"),
       });
-      commands.createDatabase?.({ databaseId: database.id });
-    } catch {
-      // creation errors surface via the store's error handling
+      history.push(database.path);
+    } catch (err) {
+      toast.error(err.message);
     }
-  }, [databases, collectionId, commands, t]);
+  }, [databases, collectionId, documentId, t]);
 
   return useMemo(() => {
     if (!team?.getPreference(TeamPreference.DocumentDatabases)) {
