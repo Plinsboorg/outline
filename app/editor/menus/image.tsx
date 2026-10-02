@@ -10,12 +10,15 @@ import {
   CommentIcon,
   LinkIcon,
 } from "outline-icons";
+import { canUndo } from "~/editor/lib/canUndo";
 import { NodeSelection } from "prosemirror-state";
 import { isNodeActive } from "@shared/editor/queries/isNodeActive";
 import { InlineIconMaxWidth } from "@shared/editor/components/Image";
 import type { MenuItem, SelectionContext } from "@shared/editor/types";
 import { metaDisplay } from "@shared/utils/keyboard";
 import { ImageSource } from "@shared/editor/lib/FileHelper";
+import { CropIcon } from "~/components/Icons/CropIcon";
+import { UndoIcon } from "~/components/Icons/UndoIcon";
 import Desktop from "~/utils/Desktop";
 import { isMarkActive } from "@shared/editor/queries/isMarkActive";
 import { t } from "i18next";
@@ -74,6 +77,17 @@ export default function imageMenuItems(
 
   return [
     {
+      name: "undo",
+      tooltip: t("Undo"),
+      icon: <UndoIcon />,
+      visible: ctx.isMobile,
+      disabled: !canUndo(state),
+    },
+    {
+      name: "separator",
+      visible: ctx.isMobile,
+    },
+    {
       name: "alignLeft",
       tooltip: t("Align left"),
       icon: <AlignImageLeftIcon />,
@@ -129,6 +143,12 @@ export default function imageMenuItems(
       tooltip: t("Download image"),
       icon: <DownloadIcon />,
       visible: !!fetch && !isEmptyDiagram(state),
+    },
+    {
+      name: "cropImage",
+      tooltip: t("Crop image"),
+      icon: <CropIcon />,
+      visible: !isDiagram(state) && !isInlineIcon,
     },
     {
       tooltip: t("Replace image"),

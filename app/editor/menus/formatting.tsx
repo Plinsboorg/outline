@@ -40,6 +40,8 @@ import {
 import { metaDisplay } from "@shared/utils/keyboard";
 import { t } from "i18next";
 import CircleIcon from "~/components/Icons/CircleIcon";
+import { UndoIcon } from "~/components/Icons/UndoIcon";
+import { canUndo } from "~/editor/lib/canUndo";
 import {
   getColorSetForSelectedCells,
   getDocumentTableBackgroundColors,
@@ -95,6 +97,19 @@ export default function formattingMenuItems(ctx: SelectionContext): MenuItem[] {
   // The block controls come first, so they are the ones on screen with a bare
   // cursor and the bar scrolls right to the text controls for a selection.
   return [
+    {
+      name: "undo",
+      group: MenuItemGroup.block,
+      tooltip: t("Undo"),
+      icon: <UndoIcon />,
+      visible: isMobile,
+      disabled: !canUndo(state),
+    },
+    {
+      name: "separator",
+      group: MenuItemGroup.block,
+      visible: isMobile,
+    },
     {
       name: "heading",
       group: MenuItemGroup.block,

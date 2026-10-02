@@ -183,7 +183,14 @@ export default class SimpleImage extends Node {
         const inputElement = document.createElement("input");
         inputElement.type = "file";
         inputElement.accept = AttachmentValidation.imageContentTypes.join(", ");
+        // Mobile browsers can garbage collect a detached input before the
+        // picker returns, so it is kept in the DOM until it is used.
+        inputElement.style.display = "none";
+        document.body.appendChild(inputElement);
+        const cleanup = () => inputElement.remove();
+        inputElement.oncancel = cleanup;
         inputElement.onchange = (event) => {
+          cleanup();
           const files = getEventFiles(event);
           void insertFiles(view, event, state.selection.from, files, {
             uploadFile,
