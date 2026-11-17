@@ -10,6 +10,7 @@ import type { Property } from "@shared/types";
 import { groupByProperty } from "@shared/utils/properties";
 import type Document from "~/models/Document";
 import NudeButton from "~/components/NudeButton";
+import DatabaseEmptyState from "./DatabaseEmptyState";
 import RowTitleInput from "./RowTitleInput";
 
 type Props = {
@@ -35,6 +36,8 @@ type Props = {
   expandedRowIds: ReadonlySet<string>;
   /** Callback toggling a row's sub-items open or closed. */
   onToggleRowExpand: (rowId: string) => void;
+  /** Callback opening the row peek panel instead of navigating to the row page. */
+  onPeekOpen?: (documentId: string) => void;
 };
 
 /**
@@ -55,6 +58,7 @@ function DatabaseList({
   parentRowIds,
   expandedRowIds,
   onToggleRowExpand,
+  onPeekOpen,
 }: Props) {
   const { t } = useTranslation();
 
@@ -68,16 +72,15 @@ function DatabaseList({
   ) : null;
 
   if (rows.length === 0 && !onNewRow) {
-    return (
-      <Empty>
-        {hasFilter ? t("No documents match the filter") : t("No documents yet")}
-      </Empty>
-    );
+    return <DatabaseEmptyState hasFilter={hasFilter} />;
   }
 
   if (!groupProperty) {
     return (
       <Container>
+        {rows.length === 0 && (
+          <DatabaseEmptyState hasFilter={hasFilter} />
+        )}
         {rows.map((document) => (
           <ListRow
             key={document.id}
@@ -89,6 +92,7 @@ function DatabaseList({
             hasSubItems={parentRowIds.has(document.id)}
             isExpanded={expandedRowIds.has(document.id)}
             onToggleExpand={onToggleRowExpand}
+            onPeekOpen={onPeekOpen}
           />
         ))}
         {newRowButton}
@@ -123,6 +127,7 @@ function DatabaseList({
                 properties={rowProperties}
                 isEditingTitle={document.id === newRowId}
                 onTitleDone={onNewRowDone}
+                onPeekOpen={onPeekOpen}
               />
             ))}
           </Container>
@@ -142,6 +147,7 @@ const ListRow = observer(function ListRow_({
   hasSubItems = false,
   isExpanded = false,
   onToggleExpand,
+  onPeekOpen,
 }: {
   document: Document;
   properties: Property[];
@@ -151,6 +157,7 @@ const ListRow = observer(function ListRow_({
   hasSubItems?: boolean;
   isExpanded?: boolean;
   onToggleExpand?: (rowId: string) => void;
+  onPeekOpen?: (documentId: string) => void;
 }) {
   const { t } = useTranslation();
   const indentStyle = depth > 0 ? { paddingLeft: 12 + depth * 20 } : undefined;
@@ -178,7 +185,16 @@ const ListRow = observer(function ListRow_({
           <CollapsedIcon size={18} />
         </DisclosureButton>
       )}
-      <RowTitle to={document.path}>{document.titleWithDefault}</RowTitle>
+      {onPeekOpen ? (
+        <RowTitleButton
+          type="button"
+          onClick={() => onPeekOpen(document.id)}
+        >
+          {document.titleWithDefault}
+        </RowTitleButton>
+      ) : (
+        <RowTitle to={document.path}>{document.titleWithDefault}</RowTitle>
+      )}
       <RowValues>
         {properties.map((property) => {
           const value = document.propertyValue(property.id);
@@ -247,6 +263,20 @@ const RowTitle = styled(Link)`
   }
 `;
 
+const RowTitleButton = styled.button`
+  background: none;
+  border: none;
+  padding: 0;
+  color: ${s("text")};
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+`;
+
 const RowValues = styled.div`
   display: flex;
   align-items: center;
@@ -303,14 +333,6 @@ const NewRowButton = styled(NudeButton)`
     background: ${s("backgroundSecondary")};
     color: ${s("text")};
   }
-`;
-
-const Empty = styled.div`
-  border: 1px solid ${s("divider")};
-  border-radius: 8px;
-  padding: 24px;
-  text-align: center;
-  color: ${s("textSecondary")};
 `;
 
 export default observer(DatabaseList);

@@ -3,6 +3,8 @@ import { cloneDeep } from "es-toolkit/compat";
 import { observer } from "mobx-react";
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+
+import { toast } from "sonner";
 import Icon from "@shared/components/Icon";
 import type { MenuItem } from "@shared/editor/types";
 import { TeamPreference } from "@shared/types";
@@ -11,6 +13,7 @@ import { TextHelper } from "@shared/utils/TextHelper";
 import useCurrentTeam from "~/hooks/useCurrentTeam";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import useStores from "~/hooks/useStores";
+import history from "~/utils/history";
 import getMenuItems from "../menus/block";
 import { useEditor } from "./EditorContext";
 import type { Props as SuggestionsMenuProps } from "./SuggestionsMenu";
@@ -107,13 +110,36 @@ function useTemplateMenuItem(): MenuItem | undefined {
 
 /**
  * Hook that returns a database menu item with children for inserting an
- * inline database block, or undefined when the feature is disabled or no
- * databases exist.
+ * inline database block. Always includes a "New database" option when the
+ * feature is enabled, plus a child per existing database.
+ *
+ * Returns undefined only when the feature is disabled for the team.
  */
 function useDatabaseMenuItem(): MenuItem | undefined {
   const { t } = useTranslation();
   const team = useCurrentTeam({ rejectOnEmpty: false });
-  const { databases } = useStores();
+  const { databases, documents, ui } = useStores();
+  const editor = useEditor();
+  const documentId = editor.props.id;
+  const document = documentId ? documents.get(documentId) : undefined;
+  // editors outside a document, such as a collection overview, have no
+  // document so the collection being viewed is used instead
+  const collectionId = document?.collectionId ?? ui.activeCollectionId;
+
+  const handleCreateDatabase = useCallback(async () => {
+    try {
+      const database = await databases.create({
+        // the server requires a location: fall back to nesting under the
+        // current document when it does not belong to a collection
+        collectionId: collectionId ?? undefined,
+        parentDocumentId: collectionId ? undefined : documentId,
+        name: t("Untitled database"),
+      });
+      history.push(database.path);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }, [databases, collectionId, documentId, t]);
 
   return useMemo(() => {
     if (!team?.getPreference(TeamPreference.DocumentDatabases)) {
@@ -121,24 +147,30 @@ function useDatabaseMenuItem(): MenuItem | undefined {
     }
 
     const available = databases.orderedData;
-    if (available.length === 0) {
-      return undefined;
-    }
 
     return {
       name: "noop",
       title: t("Database"),
       icon: <DatabaseIcon />,
       keywords: "database table rows",
-      children: available.map((database) => ({
-        name: "database",
-        title: database.name,
-        icon: <DatabaseIcon />,
-        keywords: database.name,
-        attrs: { databaseId: database.id },
-      })),
+      children: [
+        {
+          name: "noop",
+          title: t("New database"),
+          icon: <DatabaseIcon />,
+          keywords: "new create database",
+          onClick: handleCreateDatabase,
+        },
+        ...available.map((database) => ({
+          name: "database",
+          title: database.name,
+          icon: <DatabaseIcon />,
+          keywords: database.name,
+          attrs: { databaseId: database.id },
+        })),
+      ],
     } satisfies MenuItem;
-  }, [team, databases.orderedData, t]);
+  }, [team, databases.orderedData, handleCreateDatabase, t]);
 }
 
 type Props = Omit<SuggestionsMenuProps, "renderMenuItem" | "items"> &

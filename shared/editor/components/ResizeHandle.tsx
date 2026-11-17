@@ -9,8 +9,20 @@ export const ResizeLeft = styled.div<{ $dragging: boolean }>`
   bottom: 30%;
   width: 8px;
   user-select: none;
+  /* Without this the browser scrolls the page instead of resizing on touch. */
+  touch-action: none;
   opacity: ${(props) => (props.$dragging ? 1 : 0)};
   transition: opacity 150ms ease-in-out;
+
+  /* Larger touch target on touch devices, the visible grip stays in place. */
+  @media (pointer: coarse) {
+    left: -12px;
+    width: 24px;
+
+    &:after {
+      left: 16px;
+    }
+  }
 
   &:after {
     content: "";
@@ -35,6 +47,16 @@ export const ResizeLeft = styled.div<{ $dragging: boolean }>`
 export const ResizeRight = styled(ResizeLeft)`
   left: initial;
   right: -4px;
+
+  @media (pointer: coarse) {
+    left: initial;
+    right: -12px;
+
+    &:after {
+      left: initial;
+      right: 16px;
+    }
+  }
 
   &:after {
     left: initial;
@@ -69,7 +91,15 @@ export const ResizeCorner = styled.div<{ $dragging: boolean }>`
   border-radius: 50%;
   z-index: 10;
   user-select: none;
+  touch-action: none;
   opacity: ${(props) => (props.$dragging ? 1 : 0)};
+
+  /* Larger touch target on touch devices. */
+  @media (pointer: coarse) {
+    width: 28px;
+    height: 28px;
+    margin: -10px;
+  }
   transition: opacity 150ms ease-in-out;
 
   @media print {

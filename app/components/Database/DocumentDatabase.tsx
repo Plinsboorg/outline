@@ -37,7 +37,7 @@ function DocumentDatabase({ document }: Props) {
 
   return (
     <Section>
-      <SavedViews database={database} />
+      <SavedViews database={database} document={document} />
     </Section>
   );
 }
@@ -48,11 +48,19 @@ function DocumentDatabase({ document }: Props) {
  */
 const SavedViews = observer(function SavedViews_({
   database,
+  document,
 }: {
   database: Database;
+  document: Document;
 }) {
   const source = useSavedViewSource(database);
-  return <DatabaseView database={database} source={source} />;
+  return (
+    <DatabaseView
+      database={database}
+      source={source}
+      referencesDocument={document}
+    />
+  );
 });
 
 const Section = styled.div`

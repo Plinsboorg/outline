@@ -340,8 +340,10 @@ function DocumentScene({
     : document.titleWithDefault;
   const favicon = hasEmojiInTitle ? emojiToUrl(document.icon!) : undefined;
 
+  const effectiveFullWidth = document.fullWidth || isDatabaseDocument;
+
   const fullWidthTransformOffsetStyle = {
-    ["--full-width-transform-offset"]: `${document.fullWidth && showContents ? tocOffset : 0}px`,
+    ["--full-width-transform-offset"]: `${effectiveFullWidth && showContents ? tocOffset : 0}px`,
   } as React.CSSProperties;
 
   return (
@@ -399,14 +401,14 @@ function DocumentScene({
             />
           )}
           <Main
-            fullWidth={document.fullWidth}
+            fullWidth={effectiveFullWidth}
             tocPosition={tocPos}
             style={fullWidthTransformOffsetStyle}
           >
             <React.Suspense
               fallback={
                 <EditorContainer
-                  docFullWidth={document.fullWidth}
+                  docFullWidth={effectiveFullWidth}
                   showContents={showContents}
                   tocPosition={tocPos}
                 >
@@ -417,7 +419,7 @@ function DocumentScene({
               <MeasuredContainer
                 name="document"
                 as={EditorContainer}
-                docFullWidth={document.fullWidth}
+                docFullWidth={effectiveFullWidth}
                 showContents={showContents}
                 tocPosition={tocPos}
               >
@@ -433,9 +435,6 @@ function DocumentScene({
                     <Notices document={document} readOnly={readOnly} />
                     <DatabaseDocumentTitle document={document} />
                     <DocumentDatabase document={document} />
-                    <ReferencesWrapper>
-                      <References document={document} />
-                    </ReferencesWrapper>
                   </>
                 ) : (
                   <>

@@ -7,6 +7,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
   restrictToHorizontalAxis,
   restrictToVerticalAxis,
@@ -109,9 +110,6 @@ type Props = {
   parentRowIds: ReadonlySet<string>;
   /** Ids of rows whose sub-items are currently shown. */
   expandedRowIds: ReadonlySet<string>;
-  /** The rows whose open sub-item list ends after a given row, innermost
-   * first — each gets a button to add one more sub-item. */
-  listEndsAfter: ReadonlyMap<string, Document[]>;
   /** Callback toggling a row's sub-items open or closed. */
   onToggleRowExpand: (rowId: string) => void;
   /** Callback creating a sub-item under a row; absent when not allowed. */
@@ -129,6 +127,9 @@ type Props = {
     propertyId: string,
     summary: SummaryAggregation | null
   ) => void;
+  /** Callback opening the row peek panel; when provided the Open button uses
+   * it instead of navigating to the row's own page. */
+  onPeekOpen?: (documentId: string) => void;
 };
 
 /**
@@ -166,7 +167,6 @@ function DatabaseTable({
   rowDepths,
   parentRowIds,
   expandedRowIds,
-  listEndsAfter,
   onToggleRowExpand,
   onAddSubItem,
   propertiesToggle,
@@ -174,11 +174,42 @@ function DatabaseTable({
   summaries,
   canEditSummaries,
   onChangeSummary,
+  onPeekOpen,
 }: Props) {
   const { t } = useTranslation();
   const hasControlsColumn =
     !!onAddProperty || !!propertiesToggle || !!onDeleteRow;
   const hasGripColumn = !!onMoveRow;
+
+  // Virtualizer: only render rows that are within (or near) the viewport.
+  // We need the distance from the top of the document to the tbody so the
+  // virtualizer can convert scroll position to row indices.
+  //
+  // tbodyTop is re-measured whenever any element on the page changes size
+  // (e.g. images load, the editor collapses) so the virtualizer always has
+  // an accurate scroll margin and never renders the wrong rows.
+  const tbodyRef = React.useRef<HTMLTableSectionElement>(null);
+  const [tbodyTop, setTbodyTop] = React.useState(0);
+  React.useLayoutEffect(() => {
+    const measure = () => {
+      if (tbodyRef.current) {
+        setTbodyTop(
+          tbodyRef.current.getBoundingClientRect().top + window.scrollY
+        );
+      }
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(document.body);
+    return () => observer.disconnect();
+  }, []);
+
+  const rowVirtualizer = useWindowVirtualizer({
+    count: rows.length,
+    estimateSize: () => ROW_HEIGHT,
+    scrollMargin: tbodyTop,
+    overscan: 5,
+  });
   const columnCount =
     properties.length +
     1 +
@@ -316,56 +347,74 @@ function DatabaseTable({
     </tr>
   );
 
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const paddingTop =
+    virtualItems.length > 0
+      ? Math.max(0, virtualItems[0].start - rowVirtualizer.options.scrollMargin)
+      : 0;
+  const paddingBottom =
+    virtualItems.length > 0
+      ? Math.max(
+          0,
+          rowVirtualizer.getTotalSize() -
+            rowVirtualizer.options.scrollMargin -
+            virtualItems[virtualItems.length - 1].end
+        )
+      : 0;
+
   const body = (
-    <tbody>
-      {rows.map((document) => (
-        <React.Fragment key={document.id}>
-          <DatabaseTableRow
-            readOnly={readOnly}
-            document={document}
-            properties={properties}
-            titleIndex={titleIndex}
-            isEditingTitle={document.id === newRowId}
-            onTitleDone={onNewRowDone}
-            hasControlsColumn={hasControlsColumn}
-            isSortable={hasGripColumn}
-            onDelete={onDeleteRow}
-            depth={rowDepths.get(document.id) ?? 0}
-            hasSubItems={parentRowIds.has(document.id)}
-            isExpanded={expandedRowIds.has(document.id)}
-            onToggleExpand={onToggleRowExpand}
-            onAddSubItem={onAddSubItem}
-            wrappedColumnIds={wrappedColumnIds}
-          />
-          {/* an open sub-item list gets its own footer button, so sub-items
-              can be added one after another without reaching for a menu */}
-          {onAddSubItem &&
-            listEndsAfter.get(document.id)?.map((parent) => (
-              <tr key={`add-${parent.id}`}>
-                <NewRowCell colSpan={columnCount}>
-                  <NewRowButton
-                    type="button"
-                    onClick={() => onAddSubItem(parent)}
-                    width="100%"
-                    height={32}
-                    style={{
-                      paddingLeft: ((rowDepths.get(parent.id) ?? 0) + 1) * 20,
-                    }}
-                  >
-                    <PlusIcon size={18} />
-                    {t("New sub-item")}
-                  </NewRowButton>
-                </NewRowCell>
-              </tr>
-            ))}
-        </React.Fragment>
-      ))}
-      {rows.length === 0 && !onNewRow && (
+    <tbody ref={tbodyRef}>
+      {paddingTop > 0 && (
+        <tr>
+          <td style={{ height: paddingTop }} colSpan={columnCount} />
+        </tr>
+      )}
+      {virtualItems.map((virtualRow) => {
+        const document = rows[virtualRow.index];
+        if (!document) {
+          return null;
+        }
+        return (
+          <React.Fragment key={document.id}>
+            <DatabaseTableRow
+              readOnly={readOnly}
+              document={document}
+              properties={properties}
+              titleIndex={titleIndex}
+              isEditingTitle={document.id === newRowId}
+              onTitleDone={onNewRowDone}
+              hasControlsColumn={hasControlsColumn}
+              isSortable={hasGripColumn}
+              onDelete={onDeleteRow}
+              depth={rowDepths.get(document.id) ?? 0}
+              hasSubItems={parentRowIds.has(document.id)}
+              isExpanded={expandedRowIds.has(document.id)}
+              onToggleExpand={onToggleRowExpand}
+              onAddSubItem={onAddSubItem}
+              wrappedColumnIds={wrappedColumnIds}
+              onPeekOpen={onPeekOpen}
+            />
+          </React.Fragment>
+        );
+      })}
+      {paddingBottom > 0 && (
+        <tr>
+          <td style={{ height: paddingBottom }} colSpan={columnCount} />
+        </tr>
+      )}
+      {rows.length === 0 && (
         <tr>
           <EmptyCell colSpan={columnCount}>
-            {hasFilter
-              ? t("No documents match the filter")
-              : t("No documents yet")}
+            <EmptyCellHeading>
+              {hasFilter ? t("No matching rows") : t("No rows yet")}
+            </EmptyCellHeading>
+            <EmptyCellBody>
+              {hasFilter
+                ? t("Try adjusting or clearing the active filter.")
+                : !onNewRow
+                  ? t("This database has no rows.")
+                  : t("Add a row to get started.")}
+            </EmptyCellBody>
           </EmptyCell>
         </tr>
       )}
@@ -395,15 +444,22 @@ function DatabaseTable({
   const totalWidth =
     (hasGripColumn ? GRIP_COLUMN_WIDTH : 0) +
     (hasControlsColumn ? CONTROLS_COLUMN_WIDTH : 0) +
-    columnIds.reduce(
-      (sum, id) =>
+    columnIds.reduce((sum, id) => {
+      const stored = widthFor(id);
+      if (stored) {
+        return sum + stored;
+      }
+      if (id === TITLE_COLUMN_ID) {
+        return sum + DEFAULT_TITLE_WIDTH;
+      }
+      const prop = properties.find((p) => p.id === id);
+      return (
         sum +
-        (widthFor(id) ??
-          (id === TITLE_COLUMN_ID
-            ? DEFAULT_TITLE_WIDTH
-            : DEFAULT_COLUMN_WIDTH)),
-      0
-    );
+        (prop?.type === PropertyType.Relation
+          ? DEFAULT_RELATION_COLUMN_WIDTH
+          : DEFAULT_COLUMN_WIDTH)
+      );
+    }, 0);
 
   return (
     <ScrollContainer>
@@ -524,6 +580,11 @@ function DatabaseTableHeader({
       $flush={!!onUpdateProperty}
       $dragging={isDragging}
       $dropSide={dropSide}
+      $defaultWidth={
+        property.type === PropertyType.Relation
+          ? DEFAULT_RELATION_COLUMN_WIDTH
+          : undefined
+      }
       style={columnWidthStyle(width)}
     >
       {isSortable && (
@@ -566,11 +627,24 @@ function DatabaseTableHeader({
   );
 }
 
+/** Estimated height of a single data row (single-line, no wrap). */
+const ROW_HEIGHT = 37;
+
+/**
+ * Row drag-to-reorder uses verticalListSortingStrategy which requires all
+ * items to be in the DOM. Above this threshold rows are virtualized so
+ * reordering is disabled — manually sorting hundreds of rows is impractical.
+ */
+export const VIRTUALIZE_THRESHOLD = 50;
+
 /** The width every column may be resized down to but not below. */
 const MIN_COLUMN_WIDTH = 27;
 
 /** The width of a property column with no stored width. */
 const DEFAULT_COLUMN_WIDTH = 140;
+
+/** The width of a relation column with no stored width — wider to fit chips. */
+const DEFAULT_RELATION_COLUMN_WIDTH = 260;
 
 /** The width of the title column with no stored width. */
 const DEFAULT_TITLE_WIDTH = 220;
@@ -759,6 +833,46 @@ function ColumnResizeHandle({
   return <ResizeGrip onPointerDown={handlePointerDown} aria-hidden />;
 }
 
+/**
+ * A single property cell in a table row. Isolated as its own observer so that
+ * only the cell whose value changed re-renders, not the whole row.
+ */
+const TableCell = observer(function TableCell_({
+  document,
+  property,
+  canEditRow,
+  wrap,
+}: {
+  document: Document;
+  property: Property;
+  canEditRow: boolean;
+  wrap: boolean;
+}) {
+  const handleChange = React.useCallback(
+    async (value: Parameters<Document["setProperty"]>[1]) => {
+      try {
+        await document.setProperty(property.id, value);
+      } catch (error) {
+        toast.error(errToString(error));
+      }
+    },
+    [document, property.id]
+  );
+
+  return (
+    <Cell $wrap={wrap}>
+      <PropertyValueEditor
+        property={property}
+        value={document.propertyValue(property.id)}
+        onChange={handleChange}
+        readOnly={!canEditRow}
+        documentId={document.id}
+        wrap={wrap}
+      />
+    </Cell>
+  );
+});
+
 const DatabaseTableRow = observer(function DatabaseTableRow_({
   readOnly,
   document,
@@ -775,6 +889,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
   onToggleExpand,
   onAddSubItem,
   wrappedColumnIds,
+  onPeekOpen,
 }: {
   readOnly: boolean;
   document: Document;
@@ -791,6 +906,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
   onToggleExpand: (rowId: string) => void;
   onAddSubItem?: (parent: Document) => void;
   wrappedColumnIds: ReadonlySet<string>;
+  onPeekOpen?: (documentId: string) => void;
 }) {
   const { t } = useTranslation();
   const can = usePolicy(document);
@@ -810,17 +926,6 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
     setIsRenaming(false);
     onTitleDone();
   }, [onTitleDone]);
-
-  const handleChange = async (
-    propertyId: string,
-    value: Parameters<Document["setProperty"]>[1]
-  ) => {
-    try {
-      await document.setProperty(propertyId, value);
-    } catch (error) {
-      toast.error(errToString(error));
-    }
-  };
 
   // the grip is the row's only focusable handle, so it doubles as the row
   // selection that Delete acts on. Keydown is taken on the row rather than the
@@ -845,6 +950,7 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       $dragging={isDragging}
+      $depth={depth}
       onKeyDown={handleKeyDown}
     >
       {isSortable && (
@@ -859,16 +965,13 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
       )}
       {cellsWithTitle(
         properties.map((property) => (
-          <Cell key={property.id} $wrap={wrappedColumnIds.has(property.id)}>
-            <PropertyValueEditor
-              property={property}
-              value={document.propertyValue(property.id)}
-              onChange={(value) => handleChange(property.id, value)}
-              readOnly={!canEditRow}
-              documentId={document.id}
-              wrap={wrappedColumnIds.has(property.id)}
-            />
-          </Cell>
+          <TableCell
+            key={property.id}
+            document={document}
+            property={property}
+            canEditRow={canEditRow}
+            wrap={wrappedColumnIds.has(property.id)}
+          />
         )),
         titleIndex,
         <TitleCell
@@ -912,10 +1015,21 @@ const DatabaseTableRow = observer(function DatabaseTableRow_({
                     {document.titleWithDefault}
                   </TitleLink>
                 )}
-                <OpenLink to={document.path} aria-label={t("Open")}>
-                  <OpenIcon size={16} />
-                  <OpenLabel>{t("Open")}</OpenLabel>
-                </OpenLink>
+                {onPeekOpen ? (
+                  <OpenButton
+                    type="button"
+                    onClick={() => onPeekOpen(document.id)}
+                    aria-label={t("Open")}
+                  >
+                    <OpenIcon size={16} />
+                    <OpenLabel>{t("Open")}</OpenLabel>
+                  </OpenButton>
+                ) : (
+                  <OpenLink to={document.path} aria-label={t("Open")}>
+                    <OpenIcon size={16} />
+                    <OpenLabel>{t("Open")}</OpenLabel>
+                  </OpenLink>
+                )}
               </>
             )}
           </TitleContent>
@@ -1008,9 +1122,13 @@ const GripHeaderCell = styled.th`
   padding: 0;
 `;
 
-const Row = styled.tr<{ $dragging?: boolean }>`
+const Row = styled.tr<{ $dragging?: boolean; $depth?: number }>`
   background: ${(props) =>
-    props.$dragging ? props.theme.backgroundSecondary : "transparent"};
+    props.$dragging
+      ? props.theme.backgroundSecondary
+      : props.$depth
+        ? props.theme.sidebarBackground
+        : "transparent"};
   position: ${(props) => (props.$dragging ? "relative" : "static")};
   z-index: ${(props) => (props.$dragging ? 1 : "auto")};
 
@@ -1049,7 +1167,7 @@ const RowControlsCell = styled.td`
 
   /* the menu is chrome rather than data, so it stays out of the way until the
      row is pointed at or the menu itself has focus */
-  opacity: 0;
+  opacity: 0.3;
   transition: opacity 100ms ease-in-out;
 
   ${Row}:hover &,
@@ -1221,6 +1339,37 @@ const OpenLink = styled(Link)`
   }
 `;
 
+/** Same appearance as OpenLink but triggers the peek panel instead of navigating. */
+const OpenButton = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-right: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: ${s("textSecondary")};
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: ${s("backgroundSecondary")};
+  border: none;
+  cursor: pointer;
+
+  opacity: 0;
+  transition: opacity 100ms ease-in-out;
+
+  ${Row}:hover &,
+  &:focus-visible {
+    opacity: 1;
+  }
+
+  &:hover {
+    color: ${s("text")};
+  }
+`;
+
 /** The word beside the icon, dropped when the column is too narrow for it. */
 const OpenLabel = styled.span`
   @media (max-width: 600px) {
@@ -1237,9 +1386,21 @@ const TitleLink = styled(Link)<{ $wrap?: boolean }>`
 `;
 
 const EmptyCell = styled.td`
-  padding: 24px;
+  padding: 32px 24px;
   text-align: center;
+`;
+
+const EmptyCellHeading = styled.p`
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 500;
   color: ${s("textSecondary")};
+`;
+
+const EmptyCellBody = styled.p`
+  margin: 0;
+  font-size: 13px;
+  color: ${s("textTertiary")};
 `;
 
 const NewRowCell = styled.td`
